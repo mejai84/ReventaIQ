@@ -1,0 +1,130 @@
+import type { ManualOfferRegistration } from "../connectors/manual-connector";
+
+/**
+ * Fictitious sample data.
+ *
+ * WARNING: every amount, seller, rating and URL below is invented for
+ * development and tests. None of it is an observed price, a real offer or a
+ * business assumption, and none of it may be used as a business default
+ * (overview: "no se inventan ni se codifican constantes financieras").
+ *
+ * Ids use a `sample-` prefix and URLs point at `example.com` so sample data can
+ * never be confused with a real observation.
+ */
+
+export const SAMPLE_OBSERVED_AT = "2026-01-15T14:30:00.000Z";
+export const SAMPLE_REGISTERED_AT = "2026-01-15T15:00:00.000Z";
+
+export const SAMPLE_MANUAL_OFFERS: readonly ManualOfferRegistration[] = [
+  {
+    referenceId: "sample-001",
+    marketplace: "EBAY",
+    externalId: "sample-ebay-001",
+    title: "Apple iPhone 15 Pro 128GB Natural Titanium - Unlocked - Excellent",
+    model: "iPhone 15 Pro",
+    storage: "128GB",
+    conditionText: "Used - Excellent",
+    simText: "Physical SIM",
+    carrierName: "Unlocked",
+    carrierLockText: "Unlocked",
+    batteryHealthPercent: "92",
+    sellerName: "sample seller one",
+    sellerRatingPercent: "99.2",
+    sellerReviewCount: 1543,
+    url: "https://example.com/sample-ebay-001",
+    priceUSD: "410.00",
+    shippingUSD: "12.99",
+    salesTaxUSD: "0.00",
+    warrantyDays: 30,
+    observedAt: SAMPLE_OBSERVED_AT,
+    registeredAt: SAMPLE_REGISTERED_AT,
+    notes: "Sample record. Amounts are fictitious.",
+  },
+  {
+    referenceId: "sample-002",
+    marketplace: "BEST_BUY",
+    externalId: "sample-bestbuy-001",
+    title: "Apple - iPhone 15 Pro 128GB - Open Box Excellent",
+    model: "iPhone 15 Pro",
+    storage: "128 GB",
+    conditionText: "Open Box - Excellent",
+    simText: "eSIM + Physical SIM",
+    carrierName: "Unlocked",
+    carrierLockText: "Factory unlocked",
+    batteryHealthPercent: "95",
+    sellerName: "sample marketplace store",
+    sellerRatingPercent: "97.5",
+    url: "https://example.com/sample-bestbuy-001",
+    priceUSD: "899.00",
+    shippingUSD: "0.00",
+    salesTaxUSD: "0.00",
+    warrantyDays: 365,
+    observedAt: SAMPLE_OBSERVED_AT,
+    registeredAt: SAMPLE_REGISTERED_AT,
+    notes: "Sample record. New-device pricing is intentionally unrelated to resale value.",
+  },
+  {
+    referenceId: "sample-003",
+    marketplace: "WALMART",
+    externalId: "sample-walmart-001",
+    title: "Apple iPhone 13 128GB Blue - Renewed by carrier",
+    model: "iPhone 13",
+    storage: "128",
+    conditionText: "Very Good Renewed",
+    simText: "Physical SIM",
+    carrierName: "Unlocked",
+    carrierLockText: "Unlocked",
+    batteryHealthPercent: "88",
+    sellerName: "sample third party seller",
+    sellerRatingPercent: "74",
+    sellerReviewCount: 87,
+    url: "https://example.com/sample-walmart-001",
+    priceUSD: "399.99",
+    shippingUSD: "0.00",
+    salesTaxUSD: "0.00",
+    observedAt: SAMPLE_OBSERVED_AT,
+    registeredAt: SAMPLE_REGISTERED_AT,
+    notes: "Sample record. Amounts are fictitious.",
+  },
+  {
+    referenceId: "sample-004",
+    marketplace: "EBAY",
+    externalId: "sample-ebay-002",
+    title: "iPhone 14 256GB Blue - Seller refurbished - For parts",
+    model: "iPhone 14",
+    storage: "256GB",
+    conditionText: "For parts or not working",
+    simText: "Physical SIM",
+    carrierName: "Unlocked",
+    carrierLockText: "Unlocked",
+    sellerName: "sample parts seller",
+    sellerRatingPercent: "61",
+    sellerReviewCount: 12,
+    url: "https://example.com/sample-ebay-002",
+    priceUSD: "120.00",
+    shippingUSD: "18.00",
+    salesTaxUSD: "0.00",
+    observedAt: SAMPLE_OBSERVED_AT,
+    registeredAt: SAMPLE_REGISTERED_AT,
+    notes: "Sample record used to exercise non-graded conditions.",
+  },
+  {
+    referenceId: "sample-005",
+    marketplace: "MANUAL",
+    externalId: "sample-manual-001",
+    title: "iPhone 16 Pro 512GB - condition not stated by the seller page",
+    model: "iPhone 16 Pro",
+    storage: "512GB",
+    // Deliberately unrecognized: it must normalize to UNKNOWN, not to GOOD.
+    conditionText: "estado no informado",
+    simText: "no informado",
+    sellerName: "sample unverified seller",
+    url: "https://example.com/sample-manual-001",
+    priceUSD: "1050.00",
+    shippingUSD: "0.00",
+    salesTaxUSD: "0.00",
+    observedAt: SAMPLE_OBSERVED_AT,
+    registeredAt: SAMPLE_REGISTERED_AT,
+    notes: "Sample record used to exercise UNKNOWN handling.",
+  },
+];

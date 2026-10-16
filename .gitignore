@@ -1,0 +1,38 @@
+# Dependencies and package-manager caches
+node_modules/
+.npm-cache/
+
+# Next.js
+.next/
+out/
+
+# Tests and coverage
+coverage/
+playwright-report/
+test-results/
+
+# TypeScript incremental build info
+tsconfig.tsbuildinfo
+
+# Prisma generated client
+src/generated/prisma/
+
+# Environment and credentials
+.env
+.env.local
+.env.*.local
+!.env.example
+*.pem
+*.key
+
+# Editors / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
