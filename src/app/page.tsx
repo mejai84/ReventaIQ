@@ -7,11 +7,11 @@ interface NavigationItem {
 
 const navigation: readonly NavigationItem[] = [
   { label: "Dashboard", symbol: "◫", href: "/", active: true },
-  { label: "Oportunidades", symbol: "↗", href: "#opportunities" },
+  { label: "Oportunidades", symbol: "↗", href: "/opportunities" },
   { label: "Compras", symbol: "□", href: "/purchases" },
-  { label: "Capturar datos", symbol: "+", href: "#capture" },
-  { label: "Catálogo", symbol: "◇", href: "#catalog" },
-  { label: "Configuración", symbol: "·", href: "#settings" },
+  { label: "Capturar datos", symbol: "+", href: "/suppliers" },
+  { label: "Catálogo", symbol: "◇", href: "/catalog" },
+  { label: "Configuración", symbol: "·", href: "/settings" },
 ];
 
 function EmptyValue() {
@@ -57,10 +57,7 @@ export default function DashboardPage() {
             <h1>Dashboard</h1>
             <p>Resumen de capital y oportunidades evaluadas</p>
           </div>
-          <button className="primary-action" type="button">
-            <span aria-hidden="true">+</span>
-            Nueva evaluación
-          </button>
+          <a className="primary-action" href="/evaluations/new">`r`n            <span aria-hidden="true">+</span>`r`n            Nueva evaluación`r`n          </a>
         </header>
 
         <div className="workspace">

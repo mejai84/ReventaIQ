@@ -312,3 +312,10 @@ main { min-width: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; }
 }
+
+.evaluation-steps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1px; margin: 0 0 28px; padding: 0; list-style: none; background: var(--border); border: 1px solid var(--border); }
+.evaluation-steps li { min-height: 154px; padding: 20px; background: var(--surface); }
+.evaluation-steps span { color: var(--operational); font-variant-numeric: tabular-nums; font-size: 13px; font-weight: 700; }
+.evaluation-steps strong { display: block; margin-top: 18px; font-size: 16px; }
+.evaluation-steps p { margin: 4px 0 0; color: var(--text-muted); font-size: 13px; }
+@media (max-width: 900px) { .evaluation-steps { grid-template-columns: 1fr; } }
