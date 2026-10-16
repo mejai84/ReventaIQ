@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { confirmPurchase, recordPayment, cancelPurchase, reopenPurchase, createShipmentAction, updateShipmentStatusAction, addNoteAction } from "@/app/purchases/actions";
 import { prismaPurchaseRepository } from "@/modules/purchases/infrastructure/prisma-purchase-repository";
 import { requireUser } from "@/lib/auth";
 
@@ -21,7 +22,6 @@ export default async function PurchaseDetailPage({
   }
 
   if (aggregate === undefined || aggregate.createdByUserId !== String(sessionUser.id)) {
-    // Empty-state heading required by E2E: the purchase is not available.
     return (
       <main className="purchase-workspace">
         <header className="purchase-header">
@@ -57,14 +57,19 @@ export default async function PurchaseDetailPage({
           <Link className="back-link" href="/purchases">← Compras</Link>
           <h1>Detalle de compra</h1>
           <p>Referencia solicitada: <span className="mono-value">{id}</span></p>
-          <p className="small muted">Código: <span className="mono-value">{aggregate.referenceCode}</span> · estado: {aggregate.status}</p>
+          <p className="small muted">
+            Código: <span className="mono-value">{aggregate.referenceCode}</span>
+            {" · "}
+            estado: {aggregate.status}
+          </p>
         </div>
       </header>
       <section className="purchase-decision-band" aria-labelledby="detail-status-heading">
         <div>
           <h2 id="detail-status-heading">Compra #{aggregate.id}</h2>
           <p>
-            Estado: {aggregate.status}. Creada el {new Date(aggregate.createdAt).toLocaleString("es-CO", { timeZone: "UTC" })}.
+            Estado: {aggregate.status}. Creada el{" "}
+            {new Date(aggregate.createdAt).toLocaleString("es-CO", { timeZone: "UTC" })}.
           </p>
         </div>
         <span className="neutral-badge">{aggregate.status}</span>
@@ -109,6 +114,56 @@ export default async function PurchaseDetailPage({
           </div>
         </div>
       </section>
+      <section className="purchase-actions" aria-label="Acciones reales">
+        <form action={confirmPurchase} style={{ display: "inline-block", marginRight: "0.5rem" }}>
+          <input type="hidden" name="purchaseId" value={id} />
+          <button type="submit">Confirmar</button>
+        </form>
+        <form action={cancelPurchase} style={{ display: "inline-block", marginRight: "0.5rem" }}>
+          <input type="hidden" name="purchaseId" value={id} />
+          <input name="reason" placeholder="motivo de cancelación" style={{ marginRight: "0.25rem" }} />
+          <button type="submit">Cancelar</button>
+        </form>
+        <form action={reopenPurchase} style={{ display: "inline-block", marginRight: "0.5rem" }}>
+          <input type="hidden" name="purchaseId" value={id} />
+          <button type="submit">Reabrir</button>
+        </form>
+        <form action={recordPayment} style={{ display: "inline-block", marginRight: "0.5rem" }}>
+          <input type="hidden" name="purchaseId" value={id} />
+          <input name="paidAmountUSD" placeholder="pagado" style={{ width: "6rem" }} />
+          <input name="paidAt" type="datetime-local" />
+          <button type="submit">Registrar pago</button>
+        </form>
+        <form action={createShipmentAction} style={{ display: "inline-block", marginRight: "0.5rem" }}>
+          <input type="hidden" name="purchaseId" value={id} />
+          <input name="sequence" type="number" defaultValue={1} style={{ width: "4rem" }} />
+          <input name="carrierName" placeholder="transportista" />
+          <input name="trackingNumber" placeholder="tracking" />
+          <button type="submit">Crear envío</button>
+        </form>
+        <form action={addNoteAction} style={{ display: "inline-block", marginRight: "0.5rem" }}>
+          <input type="hidden" name="purchaseId" value={id} />
+          <input name="note" placeholder="nota" />
+          <button type="submit">Añadir nota</button>
+        </form>
+      </section>
+      {aggregate.shipmentRecords.length > 0 ? (
+        <section className="purchase-actions" aria-label="Cambiar estado de envío">
+          {aggregate.shipmentRecords.map((shipment) => (
+            <form key={shipment.id} action={updateShipmentStatusAction} style={{ display: "inline-block", marginRight: "0.5rem", marginBottom: "0.5rem" }}>
+              <input type="hidden" name="purchaseId" value={id} />
+              <input type="hidden" name="shipmentId" value={shipment.id} />
+              <select name="status" defaultValue="DISPATCHED">
+                <option value="DISPATCHED">Despachado</option>
+                <option value="DELIVERED">Entregado</option>
+                <option value="EXCEPTION">Excepción</option>
+                <option value="CANCELLED">Cancelado</option>
+              </select>
+              <button type="submit">Aplicar envío #{shipment.sequence}</button>
+            </form>
+          ))}
+        </section>
+      ) : null}
     </main>
   );
 }

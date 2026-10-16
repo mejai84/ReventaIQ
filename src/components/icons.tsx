@@ -23,3 +23,5 @@ export function ShoppingBag(props: IconProps) { return <BaseIcon {...props}><pat
 export function Sparkles(props: IconProps) { return <BaseIcon {...props}><path d="m12 3-1.3 5.7L5 10l5.7 1.3L12 17l1.3-5.7L19 10l-5.7-1.3L12 3ZM5 16l-.6 2.4L2 19l2.4.6L5 22l.6-2.4L8 19l-2.4-.6L5 16Z" /></BaseIcon>; }
 export function TrendingUp(props: IconProps) { return <BaseIcon {...props}><path d="m4 16 6-6 4 4 6-7M15 7h5v5" /></BaseIcon>; }
 export function X(props: IconProps) { return <BaseIcon {...props}><path d="m6 6 12 12M18 6 6 18" /></BaseIcon>; }
+export function Eye(props: IconProps) { return <BaseIcon {...props}><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" /><circle cx="12" cy="12" r="2.5" /></BaseIcon>; }
+export function EyeOff(props: IconProps) { return <BaseIcon {...props}><path d="M3 3l18 18M10.7 6.2A10.7 10.7 0 0 1 12 6c6.5 0 10 6 10 6a18 18 0 0 1-3.1 3.7M6.2 6.2A18 18 0 0 0 2 12s3.5 6 10 6c1.1 0 2.1-.2 3-.5M9.9 9.9a3 3 0 0 0 4.2 4.2" /></BaseIcon>; }
