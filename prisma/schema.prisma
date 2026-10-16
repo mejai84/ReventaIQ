@@ -199,6 +199,7 @@ model User {
   email       String   @db.Text
   displayName String   @map("display_name") @db.Text
   authSubject String?  @unique @map("auth_subject") @db.Text
+  passwordHash String? @map("password_hash") @db.Text
   role        UserRole @default(ADMIN)
   isActive    Boolean  @default(true) @map("is_active")
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)

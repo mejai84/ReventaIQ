@@ -1,0 +1,15 @@
+import Link from "next/link";
+import { ArrowUpRight, Box, CircleDollarSign, FileSearch, Plus, ShoppingBag } from "@/components/icons";
+import { requireUser } from "@/lib/auth";
+import { logout } from "@/app/login/logout";
+
+const areas = [
+  { title: "Evaluar oportunidad", description: "Reúne oferta, mercado y logística antes de decidir.", href: "/evaluations/new", icon: FileSearch },
+  { title: "Registrar compra", description: "Da seguimiento a un equipo que ya fue aprobado.", href: "/purchases", icon: ShoppingBag },
+  { title: "Gestionar catálogo", description: "Organiza productos, variantes y atributos verificables.", href: "/catalog", icon: Box },
+] as const;
+
+export default async function DashboardPage() {
+  const user = await requireUser();
+  return <main className="dashboard-page"><header className="dashboard-header"><div><p className="dashboard-kicker">Mesa de operaciones</p><h1>Hola, {user.displayName.split(" ")[0]}</h1><p>Todo está listo para registrar tu primera decisión de compra.</p></div><div className="dashboard-actions"><form action={logout}><button className="dashboard-logout" type="submit">Cerrar sesión</button></form><Link className="dashboard-primary" href="/evaluations/new"><Plus aria-hidden="true" size={18} />Nueva evaluación</Link></div></header><section className="dashboard-summary" aria-label="Resumen operativo"><div><span>Capital disponible</span><strong>Sin datos</strong><small>Configura tu capital de trabajo</small></div><div><span>Oportunidades activas</span><strong>Sin datos</strong><small>Registra evidencia para calcularlas</small></div><div><span>Compras en curso</span><strong>Sin datos</strong><small>Sin movimientos operativos</small></div></section><section className="dashboard-start" aria-labelledby="dashboard-start-title"><div className="dashboard-start-copy"><p className="dashboard-kicker">Primer paso</p><h2 id="dashboard-start-title">Convierte información en una decisión defendible.</h2><p>ReventaIQ no rellena números. Registra los datos confirmados y conserva el contexto de cada compra desde el inicio.</p><Link href="/evaluations/new">Crear una evaluación <ArrowUpRight aria-hidden="true" size={17} /></Link></div><CircleDollarSign aria-hidden="true" className="dashboard-start-icon" size={88} strokeWidth={1.2} /></section><section className="dashboard-areas" aria-labelledby="dashboard-areas-title"><div><p className="dashboard-kicker">Flujo de trabajo</p><h2 id="dashboard-areas-title">Empieza donde esté tu operación.</h2></div><div className="dashboard-area-grid">{areas.map(({ title, description, href, icon: Icon }) => <Link href={href} key={href}><Icon aria-hidden="true" size={21} /><h3>{title}</h3><p>{description}</p><span>Ir al módulo <ArrowUpRight aria-hidden="true" size={15} /></span></Link>)}</div></section></main>;
+}

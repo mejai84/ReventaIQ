@@ -41,3 +41,5 @@ npm-debug.log*
 .supabase/*.crt
 
 /src/generated/prisma
+
+.vercel

@@ -5,7 +5,7 @@ export default function PurchasesPage() {
     <main className="purchase-workspace">
       <header className="purchase-header">
         <div>
-          <Link className="back-link" href="/">← Dashboard</Link>
+          <Link className="back-link" href="/dashboard">← Dashboard</Link>
           <h1>Compras</h1>
           <p>Seguimiento operativo de equipos adquiridos y su tránsito hacia inventario.</p>
         </div>
@@ -32,7 +32,7 @@ export default function PurchasesPage() {
           <div className="purchase-empty-symbol" aria-hidden="true">□</div>
           <h3>Empieza con una oportunidad aprobada</h3>
           <p>Cuando confirmes una compra, su línea de tiempo, envíos y referencias quedarán reunidos aquí.</p>
-          <Link className="secondary-action purchase-link" href="/">
+          <Link className="secondary-action purchase-link" href="/dashboard">
             Revisar oportunidades
             <span aria-hidden="true">›</span>
           </Link>
