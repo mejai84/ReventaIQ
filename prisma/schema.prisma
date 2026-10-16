@@ -1,0 +1,1045 @@
+// ReventaIQ — esquema Prisma 7 (PostgreSQL).
+//
+// Traduccion literal de:
+//   docs/architecture/data-model-phase-1.md
+//   docs/architecture/purchases-fiscal-phase-a-design.md
+//   docs/architecture/multi-product-prisma-schema-checklist.md
+//   docs/adr/0005-multi-product-catalog.md
+//
+// Convenciones:
+//   - Dinero y pesos como Decimal; fechas como Timestamptz(3) (UTC).
+//   - Nombres fisicos en snake_case mediante @map / @@map.
+//   - Toda relacion declara onDelete: Restrict. Unica excepcion:
+//     opportunities.supersedesOpportunityId -> SetNull (checklist 4).
+//   - Enums solo para ciclos de vida estables. Categorias, marcas, grados de
+//     condicion, atributos, proveedores, marketplaces, transportistas y canales
+//     son catalogos administrables (filas), no enums.
+//   - Nada de migraciones generadas: este archivo solo describe el modelo.
+//
+// Lo que Prisma NO puede expresar (constraints CHECK, indices parciales,
+// indices por expresion y REVOKE) queda pendiente y se documenta en el informe.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums: estados de ciclo de vida estables y tipos tecnicos estables.
+// ---------------------------------------------------------------------------
+
+/// Rol del operador. Solo ADMIN por ahora; un rol nuevo es una migracion
+/// consciente, no una fila (checklist 3.1).
+enum UserRole {
+  ADMIN
+}
+
+/// Como se conecta un catalogo externo. `connector_key` selecciona el adaptador.
+enum IntegrationMode {
+  MANUAL
+  API
+  FEED
+  CSV
+}
+
+/// Selecciona que columna de valor se completa en
+/// product_variant_attribute_values. Es la base del constraint de tipo.
+enum AttributeValueType {
+  TEXT
+  NUMBER
+  BOOLEAN
+}
+
+enum PurchaseStatus {
+  DRAFT
+  CONFIRMED
+  PAID
+  IN_TRANSIT
+  DELIVERED
+  CANCELLED
+}
+
+enum ShipmentStatus {
+  PENDING
+  DISPATCHED
+  IN_CUSTOMS
+  OUT_FOR_DELIVERY
+  DELIVERED
+  EXCEPTION
+  CANCELLED
+}
+
+/// Autoria del hecho registrado en la bitacora.
+enum EventSource {
+  USER
+  SYSTEM
+  IMPORT
+}
+
+enum OfferStatus {
+  ACTIVE
+  INACTIVE
+  SOLD_OUT
+  EXPIRED
+}
+
+enum ListingStatus {
+  ACTIVE
+  INACTIVE
+  REMOVED
+  EXPIRED
+}
+
+enum OpportunityStatus {
+  ACTIVE
+  EXPIRED
+  DISMISSED
+  PURCHASED
+}
+
+enum OpportunitySignal {
+  STRONG_BUY
+  BUY
+  WATCH
+  REJECT
+}
+
+/// Autenticidad de una pieza observada en la oferta, no en el catalogo.
+enum PartAuthenticity {
+  ORIGINAL
+  REPLACED_OEM
+  REPLACED_THIRD_PARTY
+  UNKNOWN
+}
+
+/// Estado de una comprobacion de calidad. `NOT_APPLICABLE` es lo que impide
+/// tratar "una consola no tiene salud de bateria" como dato faltante.
+enum FeatureState {
+  PASS
+  FAIL
+  UNKNOWN
+  NOT_APPLICABLE
+}
+
+enum ImeiStatus {
+  CLEAN
+  BLOCKED
+  UNKNOWN
+}
+
+enum CarrierLockStatus {
+  UNLOCKED
+  LOCKED
+  UNKNOWN
+}
+
+enum IcloudStatus {
+  CLEAR
+  LOCKED
+  UNKNOWN
+}
+
+/// Base sobre la que se reserva el garantia.
+enum WarrantyReserveBasis {
+  LANDED_COST
+  SALE_PRICE
+}
+
+enum ConservativePriceStrategy {
+  MEDIAN_DISCOUNT
+  PERCENTILE
+  MINIMUM
+}
+
+enum ExchangeRateSource {
+  MANUAL
+  AUTOMATIC
+}
+
+/// Familia del identificador comercial observado (M6). UPC y EAN son valores
+/// de GTIN, no familias distintas: de ahi que solo `product_variants.gtin`
+/// sea la columna canonica.
+enum CommercialIdentifierType {
+  GTIN
+  UPC
+  EAN
+  MPN
+  OTHER
+}
+
+/// Quien registro la observacion del identificador.
+enum ExternalIdentifierSource {
+  CONNECTOR
+  MANUAL
+  IMPORT
+}
+
+/// Estado de la observacion. La promocion a `product_variants` solo ocurre
+/// desde CONFIRMED: ninguna fuente externa escribe identidad canonica por su
+/// cuenta.
+enum IdentifierPromotionStatus {
+  OBSERVED
+  CONFIRMED
+  REJECTED
+}
+
+// ---------------------------------------------------------------------------
+// Identidad y configuracion (5 modelos)
+// ---------------------------------------------------------------------------
+
+/// Identidad local del operador. Sin contrasenas ni secretos de sesion.
+model User {
+  id          BigInt   @id @default(autoincrement())
+  /// Normalizado en aplicacion. La unicidad real es UNIQUE sobre
+  /// lower(email) y va en SQL manual (checklist 5 y 6).
+  email       String   @db.Text
+  displayName String   @map("display_name") @db.Text
+  authSubject String?  @unique @map("auth_subject") @db.Text
+  role        UserRole @default(ADMIN)
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  businessSettings    BusinessSettings[]
+  conditionGrades     ConditionGrade[]
+  supplierOffers      SupplierOffer[]
+  marketListings      MarketListing[]
+  shippingQuotes      ShippingQuote[]
+  exchangeRates       ExchangeRate[]
+  purchases           Purchase[]
+  purchaseEvents      PurchaseEvent[]
+  /// Identificadores comerciales que esta persona promovio o reviso.
+  reviewedIdentifiers ProductVariantExternalIdentifier[]
+
+  @@index([email])
+  @@map("users")
+}
+
+/// Snapshot inmutable de la configuracion usada por el motor. Una modificacion
+/// crea una fila con `version` nueva y desactiva la anterior; nunca altera los
+/// settings vinculados a una oportunidad ya calculada.
+model BusinessSettings {
+  id                         BigInt                    @id @default(autoincrement())
+  userId                     BigInt                    @map("user_id")
+  version                    Int
+  isActive                   Boolean                   @default(true) @map("is_active")
+  effectiveAt                DateTime                  @map("effective_at") @db.Timestamptz(3)
+  initialCapitalCop          Decimal                   @map("initial_capital_cop") @db.Decimal(20, 4)
+  availableCapitalCop        Decimal                   @map("available_capital_cop") @db.Decimal(20, 4)
+  financedPrincipalCop       Decimal                   @map("financed_principal_cop") @db.Decimal(20, 4)
+  monthlyFinancingRate       Decimal                   @map("monthly_financing_rate") @db.Decimal(18, 8)
+  financingDaysPerMonth      Int                       @map("financing_days_per_month")
+  minimumProfitCop           Decimal                   @map("minimum_profit_cop") @db.Decimal(20, 4)
+  minimumRoiRate             Decimal                   @map("minimum_roi_rate") @db.Decimal(18, 8)
+  targetMonthlySales         Int?                      @map("target_monthly_sales")
+  cashReserveRate            Decimal                   @map("cash_reserve_rate") @db.Decimal(18, 8)
+  warrantyReserveRate        Decimal                   @map("warranty_reserve_rate") @db.Decimal(18, 8)
+  warrantyReserveBasis       WarrantyReserveBasis      @map("warranty_reserve_basis")
+  fxSpreadRate               Decimal                   @map("fx_spread_rate") @db.Decimal(18, 8)
+  safetyMarginRate           Decimal                   @map("safety_margin_rate") @db.Decimal(18, 8)
+  defaultExpectedDaysToSell  Int?                      @map("default_expected_days_to_sell")
+  maxCapitalPerProductRate   Decimal                   @map("max_capital_per_product_rate") @db.Decimal(18, 8)
+  conservativePriceStrategy  ConservativePriceStrategy @map("conservative_price_strategy")
+  conservativePriceParameter Decimal?                  @map("conservative_price_parameter") @db.Decimal(18, 8)
+  /// Politica versionada y validada con Zod. No sustituye columnas consultables.
+  signalRules                Json                      @map("signal_rules")
+  scoreConfig                Json                      @map("score_config")
+  calculationPolicyVersion   String                    @map("calculation_policy_version") @db.Text
+  scorePolicyVersion         String                    @map("score_policy_version") @db.Text
+  createdAt                  DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                  DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user          User          @relation(fields: [userId], references: [id], onDelete: Restrict)
+  opportunities Opportunity[]
+
+  @@unique([userId, version])
+  @@index([userId])
+  @@map("business_settings")
+}
+
+/// Escala de condicion. Es un catalogo administrable por usuario y categoria:
+/// un telefono y una consola no comparten graduacion (ADR-0005, M8).
+model ConditionGrade {
+  id         BigInt   @id @default(autoincrement())
+  userId     BigInt   @map("user_id")
+  categoryId BigInt   @map("category_id")
+  code       String   @db.Text
+  label      String   @db.Text
+  rank       Int
+  /// 0..100. El rango se comprueba en SQL manual.
+  scoreValue Decimal  @map("score_value") @db.Decimal(7, 4)
+  isActive   Boolean  @default(true) @map("is_active")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Restrict)
+  category       ProductCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  supplierOffers SupplierOffer[]
+  marketListings MarketListing[]
+  purchases      Purchase[]
+
+  @@unique([userId, categoryId, code])
+  @@index([categoryId, userId, rank])
+  @@map("condition_grades")
+}
+
+/// Categoria de producto administrable. **No es un enum**: una categoria nueva
+/// es una fila, no una migracion.
+model ProductCategory {
+  id        BigInt   @id @default(autoincrement())
+  code      String   @unique @db.Text
+  name      String   @db.Text
+  /// Orden de presentacion en la interfaz. Ausente significa "sin definir",
+  /// no cero.
+  sortOrder Int?     @map("sort_order")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  attributeDefinitions AttributeDefinition[]
+  conditionGrades      ConditionGrade[]
+  products             Product[]
+
+  @@map("product_categories")
+}
+
+/// Marca administrable. **No es un enum**: `sony` entra con una fila.
+model Brand {
+  id        BigInt   @id @default(autoincrement())
+  slug      String   @unique @db.Text
+  name      String   @db.Text
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  products Product[]
+
+  @@map("brands")
+}
+
+// ---------------------------------------------------------------------------
+// Catalogo (4 modelos)
+// ---------------------------------------------------------------------------
+
+/// Modelo comercial, independiente de almacenamiento, capacidad y color.
+/// ADR-0005: la marca es una fila y `family`, `generation` y `edition` ya no
+/// son columnas; son atributos (M3).
+model Product {
+  id            BigInt   @id @default(autoincrement())
+  brandId       BigInt   @map("brand_id")
+  categoryId    BigInt   @map("category_id")
+  /// Clave canonica unica; nunca es el texto de una publicacion.
+  normalizedKey String   @unique @map("normalized_key") @db.Text
+  displayName   String   @map("display_name") @db.Text
+  releaseYear   Int?     @map("release_year")
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  brand    Brand            @relation(fields: [brandId], references: [id], onDelete: Restrict)
+  category ProductCategory  @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  variants ProductVariant[]
+
+  @@index([brandId])
+  @@index([categoryId])
+  @@map("products")
+}
+
+/// Configuracion vendible (capacidad, edicion). Es el unico punto de entrada
+/// de comparaciones y de compras. Peso y dimensiones son **de producto**, desde
+/// la ficha tecnica: nunca son el peso ni las medidas del paquete.
+model ProductVariant {
+  id                     BigInt   @id @default(autoincrement())
+  productId              BigInt   @map("product_id")
+  manufacturerSku        String?  @map("manufacturer_sku") @db.Text
+  /// Identificador comercial canonico (M6). Solo la familia GTIN, sin
+  /// prefijo ni guiones: unicamente digitos. NULL cuando ninguna fuente lo
+  /// suministra. NUNCA es la clave primaria interna: la PK sigue siendo `id`.
+  ///
+  /// Decision M6: se almacena **solo** `gtin`. UPC y EAN no son columnas
+  /// propias porque son GTIN de la misma familia y tres columnas admitirian
+  /// identificadores contradictorios sin regla de desempate:
+  ///   UPC-12  = GTIN de 12 digitos
+  ///   EAN-13  = GTIN de 13 digitos
+  ///   EAN-8   = GTIN de 8 digitos
+  /// Se derivan por longitud del mismo `gtin`. Ver el catalogo canonico de
+  /// SQL manual (SQL-036).
+  gtin                   String?  @db.Text
+  /// Parte del par "MPN + Brand" de la precedencia de matching. No pertenece a
+  /// la familia GTIN: es un espacio de nombres distinto y por eso si tiene
+  /// columna propia.
+  manufacturerPartNumber String?  @map("manufacturer_part_number") @db.Text
+  /// Identificadores canonicos ausentes NO se estiman. `gtin = NULL` es un
+  /// estado legitimo y frecuente (listings usados y reacondicionados).
+  isActive               Boolean  @default(true) @map("is_active")
+  productWeightG         Decimal? @map("product_weight_g") @db.Decimal(10, 3)
+  productLengthCm        Decimal? @map("product_length_cm") @db.Decimal(10, 3)
+  productWidthCm         Decimal? @map("product_width_cm") @db.Decimal(10, 3)
+  productHeightCm        Decimal? @map("product_height_cm") @db.Decimal(10, 3)
+  /// Referencia de capacidad de envio. El peso volumetrico facturable se
+  /// calcula con el divisor del transportista, no se almacena aqui.
+  productVolumeCm3       Decimal? @map("product_volume_cm3") @db.Decimal(12, 3)
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  product             Product                            @relation(fields: [productId], references: [id], onDelete: Restrict)
+  attributeValues     ProductVariantAttributeValue[]
+  supplierOffers      SupplierOffer[]
+  marketListings      MarketListing[]
+  purchases           Purchase[]
+  /// Identificadores canonicos promovidos desde observaciones. Vacio es lo
+  /// normal: la mayoria de variantes no tendran ningun.
+  externalIdentifiers ProductVariantExternalIdentifier[]
+
+  @@index([productId, isActive])
+  @@map("product_variants")
+}
+
+/// Identificador comercial **observado** en una fuente externa, pendiente o no
+/// de promover al catalogo maestro (M6, separacion observado/confirmado).
+///
+/// Por que existe esta tabla y no bastan las columnas de `product_variants`:
+/// un anuncio de eBay, Best Buy o Walmart trae su propio identificador y su
+/// propio nivel de confianza. Si se escribiera directo en `product_variants.gtin`,
+/// una sola fuente externa modificaria en silencio la identidad canonica de un
+/// producto. Aqui la observacion vive como evidencia, y la promocion a
+/// `product_variant_id` es un acto explicito y revisable.
+///
+/// No es un MDM: no hay reglas de fusion, ni cola de trabajo, ni resolucion de
+/// duplicados. Solo observacion, evidencia y promocion.
+model ProductVariantExternalIdentifier {
+  id                 BigInt                    @id @default(autoincrement())
+  /// NULL mientras el identificador no se ha promovido. Una observacion sin
+  /// confirmar NO tiene variante: es exactamente el caso que esta tabla
+  /// representa.
+  productVariantId   BigInt?                   @map("product_variant_id")
+  identifierType     CommercialIdentifierType  @map("identifier_type")
+  /// Valor tal como lo publico la fuente. Se conserva aunque se normalice:
+  /// es la evidencia y permite reconstruir por que se normalizo asi.
+  identifierValue    String                    @map("identifier_value") @db.Text
+  /// Digitos normalizados, solo para la familia GTIN. NULL para MPN y OTHER.
+  normalizedValue    String?                   @map("normalized_value") @db.Text
+  /// Conector o proceso que lo observo: `ebay`, `bestbuy`, `walmart`,
+  /// `manual`. Nunca credenciales.
+  sourceKey          String                    @map("source_key") @db.Text
+  sourceKind         ExternalIdentifierSource  @default(CONNECTOR) @map("source_kind")
+  /// Identificador del anuncio dentro de la fuente, no el comercial.
+  externalListingKey String?                   @map("external_listing_key") @db.Text
+  /// De que registro proviene la observacion. Ambas relaciones son
+  /// opcionales porque un usuario tambien puede capturar un codigo a mano.
+  supplierOfferId    BigInt?                   @map("supplier_offer_id")
+  marketListingId    BigInt?                   @map("market_listing_id")
+  promotionStatus    IdentifierPromotionStatus @default(OBSERVED) @map("promotion_status")
+  /// Instante de la promocion. NULL mientras siga en OBSERVED.
+  promotedAt         DateTime?                 @map("promoted_at") @db.Timestamptz(3)
+  /// Quien promovio. NULL si la promocion fue automatica y todavia no ha sido
+  /// revisada por una persona.
+  reviewedByUserId   BigInt?                   @map("reviewed_by_user_id")
+  observedAt         DateTime                  @map("observed_at") @db.Timestamptz(3)
+  notes              String?                   @db.Text
+  createdAt          DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  productVariant ProductVariant? @relation(fields: [productVariantId], references: [id], onDelete: Restrict)
+  supplierOffer  SupplierOffer?  @relation(fields: [supplierOfferId], references: [id], onDelete: Restrict)
+  marketListing  MarketListing?  @relation(fields: [marketListingId], references: [id], onDelete: Restrict)
+  reviewedByUser User?           @relation(fields: [reviewedByUserId], references: [id], onDelete: Restrict)
+
+  /// Evita observar dos veces el mismo identificador desde la misma fuente.
+  @@unique([sourceKey, sourceKind, identifierType, identifierValue])
+  @@index([productVariantId])
+  @@index([supplierOfferId])
+  @@index([marketListingId])
+  @@index([reviewedByUserId])
+  /// Precedencia 1: coincidencia exacta de GTIN/UPC/EAN. Se busca por
+  /// `normalized_value`; el indice es parcial porque las filas MPN no lo usan.
+  @@index([normalizedValue], map: "pvei_normalized_value_idx")
+  /// Precedencia 2: MPN + Brand. El indice por MPN se combina en consulta
+  /// con la marca de la variante.
+  @@index([identifierValue], map: "pvei_identifier_value_idx")
+  /// Cola de promocion pendiente: lo que hay que revisar primero.
+  @@index([promotionStatus, observedAt(sort: Desc), id(sort: Desc)], map: "pvei_promotion_status_observed_at_idx")
+  @@map("product_variant_external_identifiers")
+}
+
+/// Definicion de un atributo consultable. `isComparable` decide si el atributo
+/// entra en la huella de comparables (M4).
+model AttributeDefinition {
+  id           BigInt             @id @default(autoincrement())
+  categoryId   BigInt             @map("category_id")
+  key          String             @db.Text
+  label        String             @db.Text
+  valueType    AttributeValueType @map("value_type")
+  isComparable Boolean            @default(false) @map("is_comparable")
+  isRequired   Boolean            @default(false) @map("is_required")
+  /// Unidad de medida declarada, por ejemplo `GB` o `in`. No convierte nada.
+  unit         String?            @db.Text
+  isActive     Boolean            @default(true) @map("is_active")
+  createdAt    DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  category ProductCategory                @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  values   ProductVariantAttributeValue[]
+
+  @@unique([categoryId, key])
+  @@index([categoryId, isComparable])
+  @@map("attribute_definitions")
+}
+
+/// Valor de un atributo para una variante, en columnas tipadas.
+/// Exactamente una columna queda informada segun `valueType`: lo garantiza un
+/// CHECK en SQL manual, no Prisma.
+model ProductVariantAttributeValue {
+  id                    BigInt   @id @default(autoincrement())
+  productVariantId      BigInt   @map("product_variant_id")
+  attributeDefinitionId BigInt   @map("attribute_definition_id")
+  valueText             String?  @map("value_text") @db.Text
+  valueNumber           Decimal? @map("value_number") @db.Decimal(18, 8)
+  valueBoolean          Boolean? @map("value_boolean")
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  productVariant      ProductVariant      @relation(fields: [productVariantId], references: [id], onDelete: Restrict)
+  attributeDefinition AttributeDefinition @relation(fields: [attributeDefinitionId], references: [id], onDelete: Restrict)
+
+  @@unique([productVariantId, attributeDefinitionId])
+  @@index([productVariantId, attributeDefinitionId])
+  // M4: sin estos tres indices, filtrar "misma edicion y misma capacidad" es
+  // un escaneo secuencial.
+  @@index([attributeDefinitionId, valueNumber], map: "pvav_attribute_definition_id_value_number_idx")
+  @@index([attributeDefinitionId, valueText], map: "pvav_attribute_definition_id_value_text_idx")
+  @@index([attributeDefinitionId, valueBoolean], map: "pvav_attribute_definition_id_value_boolean_idx")
+  @@map("product_variant_attribute_values")
+}
+
+// ---------------------------------------------------------------------------
+// Fuentes de compra y mercado (4 modelos)
+// ---------------------------------------------------------------------------
+
+/// Catalogo de proveedores. `connectorKey` identifica un adaptador y nunca
+/// contiene credenciales.
+model Supplier {
+  id              BigInt          @id @default(autoincrement())
+  name            String          @db.Text
+  slug            String          @unique @db.Text
+  countryCode     String          @map("country_code") @db.Char(2)
+  websiteUrl      String?         @map("website_url") @db.Text
+  connectorKey    String          @map("connector_key") @db.Text
+  integrationMode IntegrationMode @map("integration_mode")
+  isActive        Boolean         @default(true) @map("is_active")
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  offers    SupplierOffer[]
+  purchases Purchase[]
+
+  @@map("suppliers")
+}
+
+/// Oferta observada para comprar una variante. Todo lo aqui es **observado**:
+/// condicion, bateria, bloqueos y autenticidad. Nada de esto entra al catalogo.
+/// Una ausencia es NULL o UNKNOWN, nunca una condicion favorable asumida.
+model SupplierOffer {
+  id                   BigInt             @id @default(autoincrement())
+  createdByUserId      BigInt             @map("created_by_user_id")
+  supplierId           BigInt             @map("supplier_id")
+  productVariantId     BigInt             @map("product_variant_id")
+  conditionGradeId     BigInt             @map("condition_grade_id")
+  externalId           String?            @map("external_id") @db.Text
+  sourceUrl            String?            @map("source_url") @db.Text
+  rawTitle             String             @map("raw_title") @db.Text
+  currencyCode         String             @map("currency_code") @db.Char(3)
+  purchasePrice        Decimal            @map("purchase_price") @db.Decimal(20, 4)
+  usShipping           Decimal?           @map("us_shipping") @db.Decimal(20, 4)
+  usSalesTax           Decimal?           @map("us_sales_tax") @db.Decimal(20, 4)
+  paymentFee           Decimal?           @map("payment_fee") @db.Decimal(20, 4)
+  otherPurchaseCost    Decimal?           @map("other_purchase_cost") @db.Decimal(20, 4)
+  availableQuantity    Int?               @map("available_quantity")
+  status               OfferStatus        @default(ACTIVE)
+  observedAt           DateTime           @map("observed_at") @db.Timestamptz(3)
+  expiresAt            DateTime?          @map("expires_at") @db.Timestamptz(3)
+  batteryHealthPercent Decimal?           @map("battery_health_percent") @db.Decimal(7, 4)
+  screenAuthenticity   PartAuthenticity?  @map("screen_authenticity")
+  batteryAuthenticity  PartAuthenticity?  @map("battery_authenticity")
+  faceIdState          FeatureState?      @map("face_id_state")
+  trueToneState        FeatureState?      @map("true_tone_state")
+  camerasState         FeatureState?      @map("cameras_state")
+  imeiStatus           ImeiStatus?        @map("imei_status")
+  carrierLockStatus    CarrierLockStatus? @map("carrier_lock_status")
+  icloudStatus         IcloudStatus?      @map("icloud_status")
+  dentsNotes           String?            @map("dents_notes") @db.Text
+  scratchesNotes       String?            @map("scratches_notes") @db.Text
+  supplierWarrantyDays Int?               @map("supplier_warranty_days")
+  sellerReputationRate Decimal?           @map("seller_reputation_rate") @db.Decimal(7, 4)
+  sellerReviewCount    Int?               @map("seller_review_count")
+  createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  createdByUser               User                               @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+  supplier                    Supplier                           @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  productVariant              ProductVariant                     @relation(fields: [productVariantId], references: [id], onDelete: Restrict)
+  conditionGrade              ConditionGrade                     @relation(fields: [conditionGradeId], references: [id], onDelete: Restrict)
+  shippingQuotes              ShippingQuote[]
+  opportunities               Opportunity[]
+  purchases                   Purchase[]
+  /// Identificadores comerciales observados en esta oferta.
+  observedExternalIdentifiers ProductVariantExternalIdentifier[]
+
+  @@index([createdByUserId])
+  @@index([supplierId])
+  @@index([productVariantId])
+  @@index([conditionGradeId])
+  @@index([productVariantId, status, observedAt(sort: Desc), id(sort: Desc)])
+  @@index([supplierId, status, observedAt(sort: Desc), id(sort: Desc)])
+  @@map("supplier_offers")
+}
+
+/// Catalogo de mercados. Mismo contrato de conector que `suppliers`.
+model Marketplace {
+  id              BigInt          @id @default(autoincrement())
+  name            String          @db.Text
+  slug            String          @unique @db.Text
+  countryCode     String          @map("country_code") @db.Char(2)
+  websiteUrl      String?         @map("website_url") @db.Text
+  connectorKey    String          @map("connector_key") @db.Text
+  integrationMode IntegrationMode @map("integration_mode")
+  isActive        Boolean         @default(true) @map("is_active")
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  listings MarketListing[]
+
+  @@map("marketplaces")
+}
+
+/// Comparable observado en el mercado. `isComparable` y `exclusionReason` hacen
+/// auditable por que una publicacion entro o no en las estadisticas.
+model MarketListing {
+  id                   BigInt             @id @default(autoincrement())
+  createdByUserId      BigInt             @map("created_by_user_id")
+  marketplaceId        BigInt             @map("marketplace_id")
+  productVariantId     BigInt             @map("product_variant_id")
+  conditionGradeId     BigInt             @map("condition_grade_id")
+  externalId           String?            @map("external_id") @db.Text
+  sourceUrl            String?            @map("source_url") @db.Text
+  rawTitle             String             @map("raw_title") @db.Text
+  currencyCode         String             @map("currency_code") @db.Char(3)
+  price                Decimal            @db.Decimal(20, 4)
+  status               ListingStatus      @default(ACTIVE)
+  observedAt           DateTime           @map("observed_at") @db.Timestamptz(3)
+  expiresAt            DateTime?          @map("expires_at") @db.Timestamptz(3)
+  batteryHealthPercent Decimal?           @map("battery_health_percent") @db.Decimal(7, 4)
+  screenAuthenticity   PartAuthenticity?  @map("screen_authenticity")
+  batteryAuthenticity  PartAuthenticity?  @map("battery_authenticity")
+  faceIdState          FeatureState?      @map("face_id_state")
+  trueToneState        FeatureState?      @map("true_tone_state")
+  camerasState         FeatureState?      @map("cameras_state")
+  imeiStatus           ImeiStatus?        @map("imei_status")
+  carrierLockStatus    CarrierLockStatus? @map("carrier_lock_status")
+  icloudStatus         IcloudStatus?      @map("icloud_status")
+  sellerName           String?            @map("seller_name") @db.Text
+  sellerReputationRate Decimal?           @map("seller_reputation_rate") @db.Decimal(7, 4)
+  location             String?            @db.Text
+  isComparable         Boolean            @default(true) @map("is_comparable")
+  exclusionReason      String?            @map("exclusion_reason") @db.Text
+  createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  createdByUser               User                               @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+  marketplace                 Marketplace                        @relation(fields: [marketplaceId], references: [id], onDelete: Restrict)
+  productVariant              ProductVariant                     @relation(fields: [productVariantId], references: [id], onDelete: Restrict)
+  conditionGrade              ConditionGrade                     @relation(fields: [conditionGradeId], references: [id], onDelete: Restrict)
+  comparables                 OpportunityComparable[]
+  /// Identificadores comerciales observados en esta publicacion. Viven aqui y
+  /// no en `product_variants` para que una sola fuente no escriba la
+  /// identidad canonica del producto.
+  observedExternalIdentifiers ProductVariantExternalIdentifier[]
+
+  @@index([createdByUserId])
+  @@index([marketplaceId])
+  @@index([productVariantId])
+  @@index([conditionGradeId])
+  @@index([productVariantId, status, observedAt(sort: Desc), id(sort: Desc)])
+  @@index([productVariantId, conditionGradeId, status, observedAt(sort: Desc)])
+  @@map("market_listings")
+}
+
+// ---------------------------------------------------------------------------
+// Envio, cambio y venta (5 modelos)
+// ---------------------------------------------------------------------------
+
+/// Catalogo de transportistas.
+model ShippingProvider {
+  id              BigInt          @id @default(autoincrement())
+  name            String          @db.Text
+  slug            String          @unique @db.Text
+  websiteUrl      String?         @map("website_url") @db.Text
+  connectorKey    String          @map("connector_key") @db.Text
+  integrationMode IntegrationMode @map("integration_mode")
+  isActive        Boolean         @default(true) @map("is_active")
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  shippingQuotes ShippingQuote[]
+  shipments      Shipment[]
+
+  @@map("shipping_providers")
+}
+
+/// Cotizacion para una oferta concreta. Todos los componentes comparten
+/// moneda y `totalAmount` es exactamente su suma.
+///
+/// `itemWeightLb` es el peso usado para cotizar. No es el peso facturable del
+/// paquete: `weightSource` y `volumetricDivisor` dejan auditable por que esta
+/// cotizacion difiere de otra (P7).
+model ShippingQuote {
+  id                    BigInt    @id @default(autoincrement())
+  createdByUserId       BigInt    @map("created_by_user_id")
+  supplierOfferId       BigInt    @map("supplier_offer_id")
+  shippingProviderId    BigInt    @map("shipping_provider_id")
+  currencyCode          String    @map("currency_code") @db.Char(3)
+  itemWeightLb          Decimal?  @map("item_weight_lb") @db.Decimal(10, 3)
+  /// MEASUREED o DECLARED. Texto y CHECK en SQL manual, no enum: es la
+  /// procedencia de un dato, no un estado de ciclo de vida.
+  weightSource          String?   @map("weight_source") @db.Text
+  volumetricDivisor     Decimal?  @map("volumetric_divisor") @db.Decimal(18, 8)
+  internationalShipping Decimal   @map("international_shipping") @db.Decimal(20, 4)
+  handling              Decimal   @db.Decimal(20, 4)
+  insurance             Decimal?  @db.Decimal(20, 4)
+  customs               Decimal?  @db.Decimal(20, 4)
+  tariff                Decimal?  @db.Decimal(20, 4)
+  vat                   Decimal?  @db.Decimal(20, 4)
+  fuelSurcharge         Decimal?  @map("fuel_surcharge") @db.Decimal(20, 4)
+  logistics             Decimal?  @db.Decimal(20, 4)
+  nationalization       Decimal?  @db.Decimal(20, 4)
+  localDelivery         Decimal?  @map("local_delivery") @db.Decimal(20, 4)
+  otherCost             Decimal?  @map("other_cost") @db.Decimal(20, 4)
+  totalAmount           Decimal   @map("total_amount") @db.Decimal(20, 4)
+  quotedAt              DateTime  @map("quoted_at") @db.Timestamptz(3)
+  expiresAt             DateTime? @map("expires_at") @db.Timestamptz(3)
+  notes                 String?   @db.Text
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  createdByUser    User             @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+  supplierOffer    SupplierOffer    @relation(fields: [supplierOfferId], references: [id], onDelete: Restrict)
+  shippingProvider ShippingProvider @relation(fields: [shippingProviderId], references: [id], onDelete: Restrict)
+  opportunities    Opportunity[]
+  shipments        Shipment[]
+
+  @@index([createdByUserId])
+  @@index([supplierOfferId])
+  @@index([shippingProviderId])
+  @@index([supplierOfferId, quotedAt(sort: Desc), id(sort: Desc)])
+  @@map("shipping_quotes")
+}
+
+/// Tasa base observada. El spread aplicado pertenece a la version de
+/// business_settings; la oportunidad guarda ambos para evitar doble conteo.
+model ExchangeRate {
+  id                BigInt             @id @default(autoincrement())
+  /// NULL en fuentes automaticas: no todo cambio de tasa es de un usuario.
+  createdByUserId   BigInt?            @map("created_by_user_id")
+  baseCurrencyCode  String             @map("base_currency_code") @db.Char(3)
+  quoteCurrencyCode String             @map("quote_currency_code") @db.Char(3)
+  rate              Decimal            @db.Decimal(18, 8)
+  source            ExchangeRateSource
+  providerName      String?            @map("provider_name") @db.Text
+  observedAt        DateTime           @map("observed_at") @db.Timestamptz(3)
+  notes             String?            @db.Text
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  createdByUser User?         @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+  opportunities Opportunity[]
+
+  @@index([createdByUserId])
+  @@index([baseCurrencyCode, quoteCurrencyCode, observedAt(sort: Desc), id(sort: Desc)])
+  @@map("exchange_rates")
+}
+
+/// Catalogo de canales de venta.
+model SalesChannel {
+  id        BigInt   @id @default(autoincrement())
+  code      String   @unique @db.Text
+  name      String   @db.Text
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  costProfiles SalesCostProfile[]
+
+  @@map("sales_channels")
+}
+
+/// Politica versionada de costos de un canal. No hay defaults: cada perfil se
+/// ingresa o se aprueba explicitamente.
+model SalesCostProfile {
+  id                 BigInt    @id @default(autoincrement())
+  salesChannelId     BigInt    @map("sales_channel_id")
+  version            Int
+  validFrom          DateTime  @map("valid_from") @db.Timestamptz(3)
+  /// NULL significa vigente. Ausente no es cero.
+  validTo            DateTime? @map("valid_to") @db.Timestamptz(3)
+  sellingFeeRate     Decimal   @map("selling_fee_rate") @db.Decimal(18, 8)
+  withholdingRate    Decimal   @map("withholding_rate") @db.Decimal(18, 8)
+  fixedFeeCop        Decimal   @map("fixed_fee_cop") @db.Decimal(20, 4)
+  shippingCostCop    Decimal   @map("shipping_cost_cop") @db.Decimal(20, 4)
+  advertisingCostCop Decimal   @map("advertising_cost_cop") @db.Decimal(20, 4)
+  otherCostCop       Decimal   @map("other_cost_cop") @db.Decimal(20, 4)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  salesChannel  SalesChannel  @relation(fields: [salesChannelId], references: [id], onDelete: Restrict)
+  opportunities Opportunity[]
+
+  @@unique([salesChannelId, version])
+  @@index([salesChannelId])
+  @@map("sales_cost_profiles")
+}
+
+// ---------------------------------------------------------------------------
+// Analisis (2 modelos)
+// ---------------------------------------------------------------------------
+
+/// Resultado inmutable y auditable de ejecutar el motor sobre un conjunto de
+/// entradas. Una reevaluacion crea otra fila y enlaza la anterior.
+///
+/// `selectedShippingQuoteId` es opcional: una oportunidad puede calcularse sin
+/// cotizacion, pero entonces no hay costo puesto en Colombia y el resultado
+/// no debe presentarse como completo.
+model Opportunity {
+  id                       BigInt            @id @default(autoincrement())
+  supplierOfferId          BigInt            @map("supplier_offer_id")
+  businessSettingsId       BigInt            @map("business_settings_id")
+  exchangeRateId           BigInt            @map("exchange_rate_id")
+  selectedShippingQuoteId  BigInt?           @map("selected_shipping_quote_id")
+  salesCostProfileId       BigInt            @map("sales_cost_profile_id")
+  analysisVersion          String            @map("analysis_version") @db.Text
+  calculationPolicyVersion String            @map("calculation_policy_version") @db.Text
+  scorePolicyVersion       String            @map("score_policy_version") @db.Text
+  analyzedAt               DateTime          @map("analyzed_at") @db.Timestamptz(3)
+  expiresAt                DateTime?         @map("expires_at") @db.Timestamptz(3)
+  status                   OpportunityStatus @default(ACTIVE)
+  /// Unica relacion con onDelete distinto de Restrict: depurar un analisis
+  /// viejo no debe arrastrar la cadena de reevaluaciones.
+  supersedesOpportunityId  BigInt?           @map("supersedes_opportunity_id")
+  marketSampleCount        Int               @map("market_sample_count")
+  marketMinCop             Decimal?          @map("market_min_cop") @db.Decimal(20, 4)
+  marketAverageCop         Decimal?          @map("market_average_cop") @db.Decimal(20, 4)
+  marketMedianCop          Decimal?          @map("market_median_cop") @db.Decimal(20, 4)
+  marketMaxCop             Decimal?          @map("market_max_cop") @db.Decimal(20, 4)
+  conservativeSalePriceCop Decimal?          @map("conservative_sale_price_cop") @db.Decimal(20, 4)
+  exchangeRateApplied      Decimal           @map("exchange_rate_applied") @db.Decimal(18, 8)
+  fxSpreadRateApplied      Decimal           @map("fx_spread_rate_applied") @db.Decimal(18, 8)
+  productCostCop           Decimal           @map("product_cost_cop") @db.Decimal(20, 4)
+  landedCostCop            Decimal           @map("landed_cost_cop") @db.Decimal(20, 4)
+  sellingCostsCop          Decimal           @map("selling_costs_cop") @db.Decimal(20, 4)
+  warrantyReserveCop       Decimal           @map("warranty_reserve_cop") @db.Decimal(20, 4)
+  financingCostCop         Decimal           @map("financing_cost_cop") @db.Decimal(20, 4)
+  otherCostsCop            Decimal           @map("other_costs_cop") @db.Decimal(20, 4)
+  realCostCop              Decimal           @map("real_cost_cop") @db.Decimal(20, 4)
+  capitalRequiredCop       Decimal           @map("capital_required_cop") @db.Decimal(20, 4)
+  grossProfitCop           Decimal           @map("gross_profit_cop") @db.Decimal(20, 4)
+  riskAdjustedProfitCop    Decimal           @map("risk_adjusted_profit_cop") @db.Decimal(20, 4)
+  marginRate               Decimal           @map("margin_rate") @db.Decimal(18, 8)
+  roiRate                  Decimal           @map("roi_rate") @db.Decimal(18, 8)
+  monthlyEquivalentRoiRate Decimal?          @map("monthly_equivalent_roi_rate") @db.Decimal(18, 8)
+  annualizedRoiRate        Decimal?          @map("annualized_roi_rate") @db.Decimal(18, 8)
+  expectedDaysToSell       Int?              @map("expected_days_to_sell")
+  capitalVelocityScore     Decimal?          @map("capital_velocity_score") @db.Decimal(7, 4)
+  /// 0..100. El rango se comprueba en SQL manual.
+  opportunityScore         Decimal           @map("opportunity_score") @db.Decimal(7, 4)
+  signal                   OpportunitySignal
+  /// Explica el calculo exacto. No sustituye las columnas consultables.
+  calculationSnapshot      Json              @map("calculation_snapshot")
+  scoreBreakdown           Json              @map("score_breakdown")
+  riskFlags                Json              @map("risk_flags")
+  createdAt                DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  supplierOffer         SupplierOffer           @relation(fields: [supplierOfferId], references: [id], onDelete: Restrict)
+  businessSettings      BusinessSettings        @relation(fields: [businessSettingsId], references: [id], onDelete: Restrict)
+  exchangeRate          ExchangeRate            @relation(fields: [exchangeRateId], references: [id], onDelete: Restrict)
+  selectedShippingQuote ShippingQuote?          @relation(fields: [selectedShippingQuoteId], references: [id], onDelete: Restrict)
+  salesCostProfile      SalesCostProfile        @relation(fields: [salesCostProfileId], references: [id], onDelete: Restrict)
+  supersedes            Opportunity?            @relation("OpportunitySupersedes", fields: [supersedesOpportunityId], references: [id], onDelete: SetNull)
+  supersededBy          Opportunity[]           @relation("OpportunitySupersedes")
+  comparables           OpportunityComparable[]
+  purchases             Purchase[]
+
+  @@index([supplierOfferId])
+  @@index([businessSettingsId])
+  @@index([exchangeRateId])
+  @@index([selectedShippingQuoteId])
+  @@index([salesCostProfileId])
+  @@index([supersedesOpportunityId])
+  @@index([supplierOfferId, analyzedAt(sort: Desc), id(sort: Desc)])
+  @@map("opportunities")
+}
+
+/// Evidencia explicita de que publicaciones participaron en las estadisticas.
+/// PK compuesta: un listing aparece una sola vez por oportunidad.
+model OpportunityComparable {
+  opportunityId           BigInt   @map("opportunity_id")
+  marketListingId         BigInt   @map("market_listing_id")
+  included                Boolean  @default(true)
+  /// Obligatorio cuando `included` es false. CHECK en SQL manual.
+  exclusionReason         String?  @map("exclusion_reason") @db.Text
+  /// Precio y condicion tal como se aplicaron en el analisis, no los actuales.
+  priceAtAnalysisCop      Decimal  @map("price_at_analysis_cop") @db.Decimal(20, 4)
+  conditionCodeAtAnalysis String   @map("condition_code_at_analysis") @db.Text
+  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  opportunity   Opportunity   @relation(fields: [opportunityId], references: [id], onDelete: Restrict)
+  marketListing MarketListing @relation(fields: [marketListingId], references: [id], onDelete: Restrict)
+
+  @@id([opportunityId, marketListingId])
+  @@index([marketListingId])
+  @@map("opportunity_comparables")
+}
+
+// ---------------------------------------------------------------------------
+// Compras, Fase A (3 modelos)
+// ---------------------------------------------------------------------------
+
+/// Hecho de negocio: "compre esta unidad a este proveedor".
+///
+/// Referencia **solo** `productVariantId`. No tiene columnas de categoria,
+/// marca, modelo ni atributos: esa omision es lo que mantiene la compra
+/// generica entre un iPhone y una consola (ADR-0005).
+model Purchase {
+  id                  BigInt         @id @default(autoincrement())
+  createdByUserId     BigInt         @map("created_by_user_id")
+  /// Codigo corto legible por el operador, unico por usuario.
+  referenceCode       String         @map("reference_code") @db.Text
+  status              PurchaseStatus @default(DRAFT)
+  supplierId          BigInt         @map("supplier_id")
+  supplierOfferId     BigInt         @map("supplier_offer_id")
+  /// NULL: la compra puede hacerse sin analisis previo.
+  opportunityId       BigInt?        @map("opportunity_id")
+  productVariantId    BigInt         @map("product_variant_id")
+  /// Grado congelado en el momento de la compra: es un hecho historico.
+  conditionGradeId    BigInt         @map("condition_grade_id")
+  /// Fase A solo USD. El CHECK va en SQL manual.
+  currencyCode        String         @map("currency_code") @db.Char(3)
+  /// Los cinco componentes son NULL solo en DRAFT. Ausente no es cero.
+  purchasePriceUsd    Decimal?       @map("purchase_price_usd") @db.Decimal(20, 4)
+  usShippingUsd       Decimal?       @map("us_shipping_usd") @db.Decimal(20, 4)
+  usSalesTaxUsd       Decimal?       @map("us_sales_tax_usd") @db.Decimal(20, 4)
+  paymentFeeUsd       Decimal?       @map("payment_fee_usd") @db.Decimal(20, 4)
+  otherCostUsd        Decimal?       @map("other_cost_usd") @db.Decimal(20, 4)
+  /// Importe efectivamente pagado (P1). NULL hasta registrar el pago.
+  paidAmountUsd       Decimal?       @map("paid_amount_usd") @db.Decimal(20, 4)
+  /// Suma exacta de los cinco componentes. NULL solo en DRAFT.
+  totalPaidUsd        Decimal?       @map("total_paid_usd") @db.Decimal(20, 4)
+  orderedAt           DateTime       @map("ordered_at") @db.Timestamptz(3)
+  paidAt              DateTime?      @map("paid_at") @db.Timestamptz(3)
+  estimatedDeliveryAt DateTime?      @map("estimated_delivery_at") @db.Timestamptz(3)
+  deliveredAt         DateTime?      @map("delivered_at") @db.Timestamptz(3)
+  cancelledAt         DateTime?      @map("cancelled_at") @db.Timestamptz(3)
+  cancellationReason  String?        @map("cancellation_reason") @db.Text
+  sourceUrl           String?        @map("source_url") @db.Text
+  /// Incrementa en cada correccion registrada, junto al evento DATA_CORRECTED.
+  revision            Int            @default(1)
+  /// Sin datos de tarjeta ni de cuenta del proveedor.
+  notes               String?        @db.Text
+  createdAt           DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  createdByUser  User            @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+  supplier       Supplier        @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  supplierOffer  SupplierOffer   @relation(fields: [supplierOfferId], references: [id], onDelete: Restrict)
+  opportunity    Opportunity?    @relation(fields: [opportunityId], references: [id], onDelete: Restrict)
+  productVariant ProductVariant  @relation(fields: [productVariantId], references: [id], onDelete: Restrict)
+  conditionGrade ConditionGrade  @relation(fields: [conditionGradeId], references: [id], onDelete: Restrict)
+  events         PurchaseEvent[]
+  shipments      Shipment[]
+
+  @@unique([createdByUserId, referenceCode])
+  @@index([supplierId])
+  @@index([supplierOfferId])
+  @@index([opportunityId])
+  @@index([productVariantId])
+  @@index([conditionGradeId])
+  @@index([status, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([supplierOfferId, createdAt(sort: Desc), id(sort: Desc)])
+  @@map("purchases")
+}
+
+/// Bitacora append-only del ciclo de vida. Fuente de verdad de "que paso y
+/// cuando": la correccion se registra como evento nuevo, nunca se reescribe.
+///
+/// No tiene `updated_at` porque la fila no se modifica; el REVOKE de UPDATE y
+/// DELETE va en SQL manual.
+///
+/// `eventCode` es texto, no enum (P6): el dominio valida el codigo con Zod y
+/// anadir un evento no debe exigir migracion.
+model PurchaseEvent {
+  id              BigInt      @id @default(autoincrement())
+  purchaseId      BigInt      @map("purchase_id")
+  eventCode       String      @map("event_code") @db.Text
+  source          EventSource
+  occurredAt      DateTime    @map("occurred_at") @db.Timestamptz(3)
+  recordedAt      DateTime    @default(now()) @map("recorded_at") @db.Timestamptz(3)
+  /// NULL en eventos automaticos del sistema.
+  createdByUserId BigInt?     @map("created_by_user_id")
+  /// Objeto con esquema versionado, validado con Zod. Sin secretos.
+  /// El texto legible de la nota vive aqui, no en una columna propia (P4).
+  payload         Json
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  purchase      Purchase @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+  createdByUser User?    @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([purchaseId])
+  @@index([createdByUserId])
+  @@index([purchaseId, occurredAt(sort: Desc), id(sort: Desc)])
+  @@map("purchase_events")
+}
+
+/// Un envio fisico por compra. Permite mas de uno (separacion, parcialidad,
+/// reenvio) sin modelar logistica avanzada. El propietario se hereda de la
+/// compra: no se repite (P5).
+model Shipment {
+  id                  BigInt         @id @default(autoincrement())
+  purchaseId          BigInt         @map("purchase_id")
+  sequence            Int
+  status              ShipmentStatus @default(PENDING)
+  shippingProviderId  BigInt?        @map("shipping_provider_id")
+  shippingQuoteId     BigInt?        @map("shipping_quote_id")
+  /// Transportista reportada. NULL si no se informo.
+  carrierName         String?        @map("carrier_name") @db.Text
+  trackingNumber      String?        @map("tracking_number") @db.Text
+  trackingUrl         String?        @map("tracking_url") @db.Text
+  dispatchedAt        DateTime?      @map("dispatched_at") @db.Timestamptz(3)
+  estimatedDeliveryAt DateTime?      @map("estimated_delivery_at") @db.Timestamptz(3)
+  deliveredAt         DateTime?      @map("delivered_at") @db.Timestamptz(3)
+  /// Costo observado en la divisa en que se pago, sin convertir (P3). La
+  /// conversion a COP pertenece a finance con la tasa vigente.
+  /// Desconocido es NULL, no cero.
+  actualCostUsd       Decimal?       @map("actual_cost_usd") @db.Decimal(20, 4)
+  /// Peso **del paquete**, medido. Nunca se copia de la ficha tecnica del
+  /// producto: `productWeightG` no es el peso facturable.
+  actualWeightLb      Decimal?       @map("actual_weight_lb") @db.Decimal(10, 3)
+  /// MEASURED o DECLARED. Texto y CHECK en SQL manual.
+  weightSource        String?        @map("weight_source") @db.Text
+  /// Divisor aplicado cuando el volumetrico pregio al real. NULL si no aplica.
+  volumetricDivisor   Decimal?       @map("volumetric_divisor") @db.Decimal(18, 8)
+  notes               String?        @db.Text
+  createdAt           DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  purchase         Purchase          @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+  shippingProvider ShippingProvider? @relation(fields: [shippingProviderId], references: [id], onDelete: Restrict)
+  shippingQuote    ShippingQuote?    @relation(fields: [shippingQuoteId], references: [id], onDelete: Restrict)
+
+  @@unique([purchaseId, sequence])
+  @@index([shippingProviderId])
+  @@index([shippingQuoteId])
+  @@map("shipments")
+}

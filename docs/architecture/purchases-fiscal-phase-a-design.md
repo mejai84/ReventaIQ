@@ -6,7 +6,12 @@
 **Base:** [overview.md](./overview.md), [data-model-phase-1.md](./data-model-phase-1.md), [implementation-plan.md](./implementation-plan.md), [ADR-0003](../adr/0003-prisma-7-postgresql.md), [ADR-0004](../adr/0004-gated-database-migrations.md)
 
 > Este documento **no** crea `prisma/schema.prisma`, **no** genera SQL y **no** aplica
-> migraciones. A la fecha el repositorio no tiene directorio `prisma/`, ni `supabase/`,
+> migraciones. > Actualizado el 2026-10-16 para alinearse con el catálogo multiproducto de
+> [ADR-0005](../adr/0005-multi-product-catalog.md), la
+> [lista de verificación del esquema](./multi-product-prisma-schema-checklist.md) y el
+> [contraste con el dominio](./purchases-phase-a-schema-review.md).
+
+A la fecha el repositorio no tiene directorio `prisma/`, ni `supabase/`,
 > ni configuración de Supabase; el modelo de datos sigue siendo una propuesta no
 > aplicada. Cualquier cambio estructural posterior sigue el gate de
 > [ADR-0004](../adr/0004-gated-database-migrations.md): documento → aprobación →
@@ -28,7 +33,11 @@ No existe ninguna tabla creada. Las "entidades actuales" son las **propuestas** 
 | `suppliers` | `supplier_id` de la compra | `connector_key` + `integration_mode` ya prevén el origen manual/API de un marketplace como proveedor de compra |
 | `supplier_offers` | `supplier_offer_id` de la compra | Es la oferta observada que originó la compra; ya tiene precio, envío USA, impuesto, comisión y calidad |
 | `products` / `product_variants` | `product_variant_id` | SKU normalizado; el texto de la publicación nunca lo sustituye |
-| `condition_grades` | `condition_grade_id` | La condición se congela en la compra: es un hecho histórico, no una referencia viva |
+| `product_categories` | ninguna columna | La compra **no** referencia la categoría: se deduce desde la variante. Consecuencia directa de ADR-0005 |
+| `brands` | ninguna columna | La marca tampoco se duplica en la compra |
+| `attribute_definitions` | ninguna columna | Los atributos de configuración (capacidad, edición) viven en la variante, no en la compra |
+| `product_variant_attribute_values` | ninguna columna | Se consultan por variante cuando se necesita el detalle del SKU |
+| `condition_grades` | `condition_grade_id` | La condición se congela en la compra: es un hecho histórico. La escala pertenece a la categoría, de modo que la compra sigue siendo interpretable sin conocer el producto |
 | `shipping_providers` | `shipping_provider_id` del envío | Catálogo existente, sin cambios |
 | `shipping_quotes` | `shipping_quote_id` del envío | Cotización que originó el envío; la cotización y el envío son cosas distintas |
 | `opportunities` | `opportunity_id` de la compra | `opportunities.status` ya contempla `PURCHASED`; la relación se crea desde `purchases`, no alterando `opportunities` |
@@ -47,7 +56,25 @@ comparables de venta en Colombia. No se crea una tercera vía de ofertas ni una 
 de ofertas de mercado. Confirmar en el gate: el documento de Fase 1 llama "marketplaces"
 a los comparables Colombia, y esta es la lectura que evita duplicar el mismo dato.
 
-### 1.3 No se reutiliza (frontera explícita)
+### 1.3 Compatibilidad con el catálogo multiproducto
+
+La compra referencia **únicamente** `product_variant_id`. No tiene columnas de
+marca, categoría, modelo ni atributos de variante, y esa es la razón por la que el
+mismo esquema sirve para un iPhone y para una consola:
+
+| Necesidad | Cómo se resuelve sin columnas en la compra |
+| --- | --- |
+| Saber la categoría | Catálogo: variante → producto → marca, y la categoría del producto |
+| Conocer capacidad o edición | Catálogo: atributos tipados de la variante |
+| Congelar la condición comprada | `condition_grade_id` en la compra, que es un hecho histórico |
+| No duplicar datos que cambian | El catálogo se desactiva; la compra no se altera |
+
+**PS5 como segundo caso.** Una consola no cambia ni una tabla ni una fórmula: cambia
+el catálogo que la alimenta. Si una compra de consola se puede mostrar y auditar con
+las mismas secciones, el diseño es correcto; si exigiera columnas nuevas, el diseño
+estaría roto.
+
+### 1.4 No se reutiliza (frontera explícita)
 
 | Entidad diferida | Por qué no entra en Fase A |
 | --- | --- |
@@ -87,6 +114,7 @@ Hecho de negocio: "compré esta unidad a este proveedor". Es el ancla de la Fase
 | `us_sales_tax_usd` | `numeric(20,4)` | NULL sólo en `DRAFT` |
 | `payment_fee_usd` | `numeric(20,4)` | NULL sólo en `DRAFT` |
 | `other_cost_usd` | `numeric(20,4)` | NULL sólo en `DRAFT`. Ausente ≠ 0 |
+| `paid_amount_usd` | `numeric(20,4)` | Importe efectivamente pagado. NULL hasta registrar el pago. Decisión P1 |
 | `total_paid_usd` | `numeric(20,4)` | Suma exacta de los cinco componentes. NULL sólo en `DRAFT` |
 | `ordered_at` | `timestamptz` | Instante del pedido en el proveedor (UTC) |
 | `paid_at` | `timestamptz` | NULL hasta registrar el pago |
@@ -99,7 +127,8 @@ Hecho de negocio: "compré esta unidad a este proveedor". Es el ancla de la Fase
 | `notes` | `text` | Notas del operador. Sin datos de tarjeta ni de cuenta del proveedor |
 | `created_at`, `updated_at` | `timestamptz` | NOT NULL |
 
-Columnas deliberadamente **ausentes** en Fase A: todo importe en COP, costo puesto en
+Columnas deliberadamente **ausentes** en Fase A: categoría, marca, modelo y atributos
+de variante, que viven en el catálogo; todo importe en COP, costo puesto en
 Colombia, impuesto de importación, utilidad, ROI, y cualquier campo fiscal o de
 inventario. No existen todavía fuentes de verdad para ellos.
 
@@ -143,13 +172,27 @@ modelar logística avanzada.
 | `estimated_delivery_at` | `timestamptz` | NULL |
 | `delivered_at` | `timestamptz` | NULL |
 | `actual_cost_usd` | `numeric(20,4)` | NULL. Desconocido ≠ 0 |
-| `actual_weight_lb` | `numeric(10,3)` | NULL. > 0 cuando presente |
+| `actual_weight_lb` | `numeric(10,3)` | Peso **del paquete**, medido. NULL si no se midió; nunca 0 ni copiado de la ficha técnica |
+| `weight_source` | `text` | Cómo se obtuvo el peso: `MEASURED` o `DECLARED`. Permite auditar el costo |
+| `volumetric_divisor` | `numeric(18,8)` | Divisor aplicado cuando el peso volumétrico preguió al real. NULL si no aplica |
 | `notes` | `text` | NOTAS del operador |
 | `created_at`, `updated_at` | `timestamptz` | NOT NULL |
 
 **No se almacenan** dirección de destino, nombre del receptor, teléfono, correo ni
 documento de identidad. Fase A no tiene receptor identificado como cliente: el
 envío va a una dirección de casillero ya existente fuera de ReventaIQ.
+
+**Peso de producto frente a peso de paquete.** El peso y las dimensiones de
+producto viven en `product_variants` (ficha técnica) y sirven para dimensionar caja y
+comparar fichas. El peso del paquete se mide en `shipments` y es el único que puede
+facturar. Nunca se deriva uno del otro: caja, protección y accesorios incluidos
+cambian el peso, y un paquete de peso desconocido es `NULL`, no cero.
+
+**Moneda del costo real del envío.** `actual_cost_usd` registra el costo observado en
+la divisa en que se pagó, sin convertirlo. La conversión a COP y el peso volumétrico
+pertenecen al módulo financiero, que aplica la tasa vigente en el momento; Fase A no
+almacena importes convertidos. Esta decisión resuelve el conflicto detectado en §9 de
+este documento y en la revisión de esquema (decisión P3).
 
 ### 2.4 Relaciones nuevas (ERD)
 
@@ -293,6 +336,21 @@ dominio, no por la base de datos.
 ### 4.4 Índices, constraints y unicidad propuestos
 
 Íntegramente listados en §9 para mantener el razonamiento junto al riesgo.
+
+---
+
+---
+
+## 4bis. Decisiones adoptadas en esta actualización
+
+| # | Decisión | Qué se adopta |
+| --- | --- | --- |
+| **P1** | Importe pagado | `purchases.paid_amount_usd numeric(20,4)`, con constraint de igualdad contra `total_paid_usd` en el estado `PAID`. El código de aplicación ya exige el dato; sin columna la acción de pago no tenía dónde escribir |
+| **P3** | Costo real del envío | Se registra en la divisa observada (`actual_cost_usd`), sin conversión almacenada. La conversión a COP y el peso volumétrico se calculan en `finance`, que aplica la tasa vigente. Se añaden `weight_source` y `volumetric_divisor` para poder auditar el total |
+| **DB** | Producto frente a paquete | El peso de producto vive en la variante; el de paquete, medido, en el envío. Prohibido rellenar uno con el otro |
+| **ADR-0005** | Multiproducto | La compra referencia sólo `product_variant_id`; sin columnas de categoría, marca ni atributos |
+
+Ninguna de estas decisiones cambia el motor financiero ni el Opportunity Engine.
 
 ---
 
@@ -721,6 +779,24 @@ Se nombran **sólo** para delimitar; ninguna se diseña aquí.
 | F — Alertas y watchlist | `Alert`, `Watchlist`, precio objetivo | Fuera del eje de esta entrega |
 
 ---
+
+---
+
+## Anexo. Catálogo multiproducto y Fase A
+
+| Pregunta | Respuesta tras ADR-0005 |
+| --- | --- |
+| ¿La compra cambia con otra categoría? | No. Referencia sólo `product_variant_id` |
+| ¿El motor se bifurca? | No. Un solo motor financiero y un solo Opportunity Engine |
+| ¿Dónde viven capacidad y edición? | En atributos tipados de la variante, con columnas por tipo |
+| ¿Dónde viven condición, batería y bloqueo? | En la oferta y la unidad, nunca en el catálogo |
+| ¿Dónde vive el IMEI? | En el inventario futuro, que sigue diferido |
+| ¿Qué peso se factura? | El del paquete, medido; el de producto es sólo referencia |
+| ¿Cómo se comprueba la segunda categoría? | Con PS5: misma compra, mismo desglose, mismo motor |
+
+El caso PS5 sirve de prueba de que el diseño es multiproducto y no un iPhone con
+márgenes: si una consola exige columnas nuevas, el error está en el catálogo, no en la
+compra.
 
 ## Resumen de la propuesta
 

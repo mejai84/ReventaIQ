@@ -1,15 +1,17 @@
 interface NavigationItem {
   readonly label: string;
   readonly symbol: string;
+  readonly href: string;
   readonly active?: boolean;
 }
 
 const navigation: readonly NavigationItem[] = [
-  { label: "Dashboard", symbol: "◫", active: true },
-  { label: "Oportunidades", symbol: "↗" },
-  { label: "Capturar datos", symbol: "+" },
-  { label: "Catálogo", symbol: "□" },
-  { label: "Configuración", symbol: "·" },
+  { label: "Dashboard", symbol: "◫", href: "/", active: true },
+  { label: "Oportunidades", symbol: "↗", href: "#opportunities" },
+  { label: "Compras", symbol: "□", href: "/purchases" },
+  { label: "Capturar datos", symbol: "+", href: "#capture" },
+  { label: "Catálogo", symbol: "◇", href: "#catalog" },
+  { label: "Configuración", symbol: "·", href: "#settings" },
 ];
 
 function EmptyValue() {
@@ -29,8 +31,8 @@ export default function DashboardPage() {
         </div>
 
         <nav className="navigation">
-          {navigation.map(({ label, symbol, active }) => (
-            <a key={label} href={active ? "/" : `#${label.toLowerCase()}`} aria-current={active ? "page" : undefined}>
+          {navigation.map(({ label, symbol, href, active }) => (
+            <a key={label} href={href} aria-current={active ? "page" : undefined}>
               <span className="nav-symbol" aria-hidden="true">{symbol}</span>
               <span>{label}</span>
             </a>
