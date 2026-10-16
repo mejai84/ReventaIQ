@@ -41,6 +41,7 @@ const quoteForm = z.object({
   supplierOfferId: z.string().regex(/^\d+$/).transform(BigInt),
   shippingProviderId: z.string().regex(/^\d+$/).transform(BigInt),
   quotedAt: z.string().datetime({ offset: true }),
+  estimatedDeliveryDays: z.string().regex(/^\d+$/).transform(Number).refine((value) => Number.isSafeInteger(value) && value > 0 && value <= 365),
   expiresAt: z.union([z.literal(""), z.string().datetime({ offset: true })]),
   itemWeightLb: z.union([z.literal(""), z.string().trim().regex(/^\d+(?:\.\d{1,3})?$/)]),
   weightSource: z.union([z.literal(""), z.enum(["MEASURED", "DECLARED"])]),
@@ -65,7 +66,7 @@ export async function createShippingQuote(formData: FormData): Promise<void> {
     .map((value) => new Decimal(value));
   const totalAmount = amounts.reduce((total, amount) => total.plus(amount), new Decimal(0)).toFixed(4);
   await prisma.shippingQuote.create({ data: {
-    createdByUserId: user.id, supplierOfferId: offer.id, shippingProviderId: provider.id, currencyCode: "COP", quotedAt: input.quotedAt,
+    createdByUserId: user.id, supplierOfferId: offer.id, shippingProviderId: provider.id, currencyCode: "COP", quotedAt: input.quotedAt, estimatedDeliveryDays: input.estimatedDeliveryDays,
     internationalShipping: input.internationalShipping, insurance: input.insurance, customs: input.customs, vat: input.vat, handling: input.handling, nationalization: input.nationalization, localDelivery: input.localDelivery, totalAmount,
     ...(input.expiresAt === "" ? {} : { expiresAt: input.expiresAt }), ...(input.itemWeightLb === "" ? {} : { itemWeightLb: input.itemWeightLb, weightSource: input.weightSource }),
     ...(input.fuelSurcharge === "" ? {} : { fuelSurcharge: input.fuelSurcharge }), ...(input.logistics === "" ? {} : { logistics: input.logistics }), ...(input.tariff === "" ? {} : { tariff: input.tariff }), ...(input.otherCost === "" ? {} : { otherCost: input.otherCost }), ...(input.notes === "" ? {} : { notes: input.notes }),

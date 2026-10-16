@@ -625,6 +625,8 @@ model MarketListing {
   marketplaceId        BigInt             @map("marketplace_id")
   productVariantId     BigInt             @map("product_variant_id")
   conditionGradeId     BigInt             @map("condition_grade_id")
+  /// Canal de venta usado por el motor; opcional para preservar observaciones históricas.
+  salesChannelId       BigInt?            @map("sales_channel_id")
   externalId           String?            @map("external_id") @db.Text
   sourceUrl            String?            @map("source_url") @db.Text
   rawTitle             String             @map("raw_title") @db.Text
@@ -654,6 +656,7 @@ model MarketListing {
   marketplace                 Marketplace                        @relation(fields: [marketplaceId], references: [id], onDelete: Restrict)
   productVariant              ProductVariant                     @relation(fields: [productVariantId], references: [id], onDelete: Restrict)
   conditionGrade              ConditionGrade                     @relation(fields: [conditionGradeId], references: [id], onDelete: Restrict)
+  salesChannel                SalesChannel?                      @relation(fields: [salesChannelId], references: [id], onDelete: Restrict)
   comparables                 OpportunityComparable[]
   /// Identificadores comerciales observados en esta publicacion. Viven aqui y
   /// no en `product_variants` para que una sola fuente no escriba la
@@ -664,6 +667,7 @@ model MarketListing {
   @@index([marketplaceId])
   @@index([productVariantId])
   @@index([conditionGradeId])
+  @@index([salesChannelId])
   @@index([productVariantId, status, observedAt(sort: Desc), id(sort: Desc)])
   @@index([productVariantId, conditionGradeId, status, observedAt(sort: Desc)])
   @@map("market_listings")
@@ -704,6 +708,8 @@ model ShippingQuote {
   shippingProviderId    BigInt    @map("shipping_provider_id")
   currencyCode          String    @map("currency_code") @db.Char(3)
   itemWeightLb          Decimal?  @map("item_weight_lb") @db.Decimal(10, 3)
+  /// Días estimados de tránsito; requerido para que el motor acepte la cotización.
+  estimatedDeliveryDays Int?      @map("estimated_delivery_days")
   /// MEASUREED o DECLARED. Texto y CHECK en SQL manual, no enum: es la
   /// procedencia de un dato, no un estado de ciclo de vida.
   weightSource          String?   @map("weight_source") @db.Text
@@ -773,6 +779,7 @@ model SalesChannel {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   costProfiles SalesCostProfile[]
+  marketListings MarketListing[]
 
   @@map("sales_channels")
 }

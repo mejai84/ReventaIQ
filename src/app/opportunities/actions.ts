@@ -26,7 +26,7 @@ export async function createMarketplace(formData: FormData): Promise<void> {
 }
 
 const listingForm = z.object({
-  marketplaceId: z.string().regex(/^\d+$/).transform(BigInt), productVariantId: z.string().regex(/^\d+$/).transform(BigInt), conditionGradeId: z.string().regex(/^\d+$/).transform(BigInt),
+  marketplaceId: z.string().regex(/^\d+$/).transform(BigInt), salesChannelId: z.string().regex(/^\d+$/).transform(BigInt), productVariantId: z.string().regex(/^\d+$/).transform(BigInt), conditionGradeId: z.string().regex(/^\d+$/).transform(BigInt),
   rawTitle: z.string().trim().min(2).max(500), price: z.string().trim().regex(/^\d+(?:\.\d{1,4})?$/), observedAt: z.string().datetime({ offset: true }), expiresAt: z.union([z.literal(""), z.string().datetime({ offset: true })]), sourceUrl: url, externalId: z.string().trim().max(200), sellerName: z.string().trim().max(160), location: z.string().trim().max(160), isComparable: z.enum(["yes", "no"]), exclusionReason: z.string().trim().max(500),
 });
 
@@ -36,14 +36,15 @@ export async function createMarketListing(formData: FormData): Promise<void> {
   if (!parsed.success) redirect("/opportunities?listingError=validation");
   const input = parsed.data;
   if (input.isComparable === "no" && input.exclusionReason === "") redirect("/opportunities?listingError=reason");
-  const [marketplace, variant, grade] = await Promise.all([
+  const [marketplace, variant, grade, salesChannel] = await Promise.all([
     prisma.marketplace.findFirst({ where: { id: input.marketplaceId, isActive: true }, select: { id: true } }),
     prisma.productVariant.findFirst({ where: { id: input.productVariantId, isActive: true }, include: { product: { select: { categoryId: true } } } }),
     prisma.conditionGrade.findFirst({ where: { id: input.conditionGradeId, userId: user.id, isActive: true }, select: { id: true, categoryId: true } }),
+    prisma.salesChannel.findFirst({ where: { id: input.salesChannelId, isActive: true }, select: { id: true } }),
   ]);
-  if (marketplace === null || variant === null || grade === null || variant.product.categoryId !== grade.categoryId) redirect("/opportunities?listingError=relation");
+  if (marketplace === null || variant === null || grade === null || variant.product.categoryId !== grade.categoryId || salesChannel === null) redirect("/opportunities?listingError=relation");
   await prisma.marketListing.create({ data: {
-    createdByUserId: user.id, marketplaceId: marketplace.id, productVariantId: variant.id, conditionGradeId: grade.id, rawTitle: input.rawTitle, currencyCode: "COP", price: input.price, observedAt: input.observedAt, isComparable: input.isComparable === "yes",
+    createdByUserId: user.id, marketplaceId: marketplace.id, salesChannelId: salesChannel.id, productVariantId: variant.id, conditionGradeId: grade.id, rawTitle: input.rawTitle, currencyCode: "COP", price: input.price, observedAt: input.observedAt, isComparable: input.isComparable === "yes",
     ...(input.expiresAt === "" ? {} : { expiresAt: input.expiresAt }), ...(input.sourceUrl === "" ? {} : { sourceUrl: input.sourceUrl }), ...(input.externalId === "" ? {} : { externalId: input.externalId }), ...(input.sellerName === "" ? {} : { sellerName: input.sellerName }), ...(input.location === "" ? {} : { location: input.location }), ...(input.exclusionReason === "" ? {} : { exclusionReason: input.exclusionReason }),
   } });
   revalidatePath("/opportunities");
