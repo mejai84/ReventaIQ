@@ -9,14 +9,14 @@ export default function HomePage() {
     <main className="apple-landing">
       <nav className="apple-global-nav" aria-label="Navegación principal">
         <Link className="apple-wordmark" href="/" aria-label="ReventaIQ, inicio"><span aria-hidden="true">R</span>ReventaIQ</Link>
-        <Link href="/login">Acceder <ArrowUpRight size={14} /></Link>
+        <Link href="/dashboard">Acceder <ArrowUpRight size={14} /></Link>
       </nav>
-      <section className="apple-local-nav"><b>ReventaIQ</b><Link href="/login" className="apple-nav-cta">Abrir dashboard</Link></section>
+      <section className="apple-local-nav"><b>ReventaIQ</b><Link href="/dashboard" className="apple-nav-cta">Abrir dashboard</Link></section>
       <section className="apple-hero" aria-labelledby="hero-title">
         <p className="apple-kicker">OPERACIONES DE REVENTA</p>
         <h1 id="hero-title">Tecnología bien<br />decidida.</h1>
         <p>La mesa de operaciones para convertir una oferta en una decisión rentable, trazable y preparada para crecer.</p>
-        <div className="apple-hero-actions"><Link className="apple-blue-pill" href="/login">Entrar al dashboard <ArrowRight size={16} /></Link><a className="apple-text-link" href="#flujo">Descubrir cómo funciona <ArrowRight size={15} /></a></div>
+        <div className="apple-hero-actions"><Link className="apple-blue-pill" href="/dashboard">Entrar al dashboard <ArrowRight size={16} /></Link><a className="apple-text-link" href="#flujo">Descubrir cómo funciona <ArrowRight size={15} /></a></div>
         <AppleParallaxStage />
       </section>
       <section className="apple-highlights" aria-label="Ventajas de ReventaIQ">
