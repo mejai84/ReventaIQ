@@ -59,3 +59,27 @@ export async function createCatalogProduct(formData: FormData): Promise<void> {
   revalidatePath("/catalog");
   redirect("/catalog?created=1");
 }
+
+const conditionForm = z.object({
+  categoryId: z.string().regex(/^\d+$/).transform(BigInt),
+  code: z.string().trim().min(2).max(48).regex(/^[A-Z0-9_]+$/),
+  label: z.string().trim().min(2).max(80),
+  rank: z.string().regex(/^\d+$/).transform(Number).refine(Number.isSafeInteger),
+  scoreValue: z.string().trim().regex(/^\d+(?:\.\d{1,4})?$/).refine((value) => Number(value) <= 100),
+});
+
+export async function createConditionGrade(formData: FormData): Promise<void> {
+  const user = await requireUser();
+  const result = conditionForm.safeParse(Object.fromEntries(formData));
+  if (!result.success) redirect("/catalog?gradeError=validation");
+  const category = await prisma.productCategory.findUnique({ where: { id: result.data.categoryId }, select: { id: true } });
+  if (category === null) redirect("/catalog?gradeError=category");
+  try {
+    await prisma.conditionGrade.create({ data: { userId: user.id, categoryId: category.id, code: result.data.code, label: result.data.label, rank: result.data.rank, scoreValue: result.data.scoreValue } });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") redirect("/catalog?gradeError=duplicate");
+    throw error;
+  }
+  revalidatePath("/catalog");
+  redirect("/catalog?gradeCreated=1");
+}
