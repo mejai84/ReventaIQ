@@ -1,43 +1,15 @@
 import Link from "next/link";
+import { requireUser } from "@/lib/auth";
+import { prisma } from "@/lib/db";
+import { createPurchaseFromOpportunity } from "./actions";
 
-export default function PurchasesPage() {
-  return (
-    <main className="purchase-workspace">
-      <header className="purchase-header">
-        <div>
-          <Link className="back-link" href="/dashboard">← Dashboard</Link>
-          <h1>Compras</h1>
-          <p>Seguimiento operativo de equipos adquiridos y su tránsito hacia inventario.</p>
-        </div>
-        <button className="primary-action" type="button" disabled aria-disabled="true">
-          Registrar compra
-        </button>
-      </header>
-
-      <section className="purchase-decision-band" aria-labelledby="purchase-status-heading">
-        <div className="purchase-band-mark" aria-hidden="true">+</div>
-        <div>
-          <h2 id="purchase-status-heading">Aún no hay compras registradas</h2>
-          <p>La creación de compras se habilitará cuando esté lista la persistencia de Fase A.</p>
-        </div>
-        <span className="neutral-badge">Sin datos operativos</span>
-      </section>
-
-      <section className="purchase-ledger" aria-labelledby="purchase-ledger-heading">
-        <div className="purchase-ledger-heading">
-          <h2 id="purchase-ledger-heading">Registro de compras</h2>
-          <p>El historial conservará el estado, origen y evidencia de cada movimiento.</p>
-        </div>
-        <div className="purchase-empty">
-          <div className="purchase-empty-symbol" aria-hidden="true">□</div>
-          <h3>Empieza con una oportunidad aprobada</h3>
-          <p>Cuando confirmes una compra, su línea de tiempo, envíos y referencias quedarán reunidos aquí.</p>
-          <Link className="secondary-action purchase-link" href="/dashboard">
-            Revisar oportunidades
-            <span aria-hidden="true">›</span>
-          </Link>
-        </div>
-      </section>
-    </main>
-  );
+export default async function PurchasesPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+  const user = await requireUser();
+  const [params, purchases, opportunities] = await Promise.all([
+    searchParams,
+    prisma.purchase.findMany({ where: { createdByUserId: user.id }, include: { productVariant: { include: { product: true } }, supplier: true }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 50 }),
+    prisma.opportunity.findMany({ where: { status: "ACTIVE", supplierOffer: { createdByUserId: user.id }, purchases: { none: {} } }, include: { supplierOffer: { include: { productVariant: { include: { product: true } } } } }, orderBy: [{ analyzedAt: "desc" }, { id: "desc" }], take: 50 }),
+  ]);
+  const error = params.error === "opportunity" ? "La oportunidad ya no está disponible." : params.error === "duplicate" ? "Ya existe una compra para esa oportunidad." : params.error === "validation" ? "Selecciona una oportunidad válida." : undefined;
+  return <main className="purchase-workspace"><header className="purchase-header"><div><Link className="back-link" href="/dashboard">← Dashboard</Link><h1>Compras</h1><p>Registro operativo y trazable de adquisiciones confirmadas.</p></div></header>{error ? <p className="form-feedback" role="alert">{error}</p> : null}<section className="catalog-layout"><form action={createPurchaseFromOpportunity} className="data-form"><div className="form-heading"><div><h2>Registrar compra</h2><p>Crea un borrador desde una oportunidad evaluada; no modifica su análisis.</p></div></div><label>Oportunidad<select name="opportunityId" required disabled={opportunities.length === 0}><option value="">Selecciona</option>{opportunities.map((item) => <option key={item.id.toString()} value={item.id.toString()}>{item.supplierOffer.productVariant.product.displayName} · {item.signal} · {item.riskAdjustedProfitCop.toString()} COP</option>)}</select></label><button className="form-submit" type="submit" disabled={opportunities.length === 0}>Crear borrador</button>{opportunities.length === 0 ? <p className="form-hint">No hay oportunidades activas sin compra. Ejecuta una evaluación primero.</p> : null}</form><section className="data-list"><div className="list-heading"><div><p className="dashboard-kicker">Persistencia activa</p><h2>Registro de compras</h2></div><span>{purchases.length}</span></div>{purchases.length === 0 ? <div className="data-empty"><h3>Aún no hay compras registradas.</h3><p>Cuando registres una, sus cambios y eventos quedarán auditados.</p></div> : <ul className="catalog-list">{purchases.map((purchase) => <li key={purchase.id.toString()}><div><strong><Link href={`/purchases/${purchase.id.toString()}`}>{purchase.productVariant.product.displayName}</Link></strong><span>{purchase.referenceCode} · {purchase.status}</span><code>{purchase.supplier.name}</code></div><div><span>{purchase.createdAt.toISOString()}</span></div></li>)}</ul>}</section></section></main>;
 }

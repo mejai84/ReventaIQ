@@ -16,15 +16,23 @@ export async function login(formData: FormData): Promise<void> {
   try {
     user = await prisma.user.findFirst({ where: { email, isActive: true }, select: { id: true, passwordHash: true } });
   } catch (error) {
-    console.error("Login database lookup failed", error);
+    console.error("Login database lookup failed", { error: error instanceof Error ? error.message : "unknown" });
     redirect("/login?error=1");
   }
-  if (user === null || user.passwordHash === null || !verifyPassword(password, user.passwordHash)) redirect("/login?error=1");
+  if (user === null || user.passwordHash === null) redirect("/login?error=1");
+
+  let passwordOk = false;
+  try {
+    passwordOk = verifyPassword(password, user.passwordHash);
+  } catch (error) {
+    console.error("Login password verification failed", { error: error instanceof Error ? error.message : "unknown" });
+  }
+  if (!passwordOk) redirect("/login?error=1");
 
   try {
     await createSession(user.id.toString());
   } catch (error) {
-    console.error("Login session creation failed", error);
+    console.error("Login session creation failed", { error: error instanceof Error ? error.message : "unknown" });
     redirect("/login?error=1");
   }
   redirect("/dashboard");
