@@ -7,6 +7,7 @@ function BaseIcon({ children, size = 20, ...props }: IconProps) {
 }
 
 export function ArrowRight(props: IconProps) { return <BaseIcon {...props}><path d="M5 12h14M13 6l6 6-6 6" /></BaseIcon>; }
+export function ArrowLeft(props: IconProps) { return <BaseIcon {...props}><path d="M19 12H5m6-6-6 6 6 6" /></BaseIcon>; }
 export function ArrowUpRight(props: IconProps) { return <BaseIcon {...props}><path d="M7 17 17 7M8 7h9v9" /></BaseIcon>; }
 export function BarChart3(props: IconProps) { return <BaseIcon {...props}><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></BaseIcon>; }
 export function Box(props: IconProps) { return <BaseIcon {...props}><path d="m3 7 9-4 9 4-9 4-9-4Zm0 0v10l9 4 9-4V7M12 11v10" /></BaseIcon>; }
