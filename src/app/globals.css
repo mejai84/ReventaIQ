@@ -210,6 +210,10 @@ main { min-width: 0; }
   margin: 0 auto;
   padding: clamp(24px, 5vw, 64px);
 }
+.purchase-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; list-style: none; padding: 0; margin: 24px 0 0; counter-reset: step; }
+.purchase-steps li { background: var(--surface); border: 1px solid var(--border); padding: 20px; border-radius: 12px; }
+.purchase-steps li strong { display: block; margin-bottom: 6px; font-size: 15px; }
+.purchase-steps li p { margin: 0; color: var(--text-muted); font-size: 14px; }
 .purchase-header {
   display: flex;
   align-items: end;
