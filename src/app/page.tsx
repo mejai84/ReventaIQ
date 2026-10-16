@@ -57,7 +57,7 @@ export default function DashboardPage() {
             <h1>Dashboard</h1>
             <p>Resumen de capital y oportunidades evaluadas</p>
           </div>
-          <a className="primary-action" href="/evaluations/new">`r`n            <span aria-hidden="true">+</span>`r`n            Nueva evaluación`r`n          </a>
+          <a className="primary-action" href="/evaluations/new"><span aria-hidden="true">+</span>Nueva evaluación</a>
         </header>
 
         <div className="workspace">
