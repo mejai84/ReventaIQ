@@ -19,6 +19,25 @@ const form = z.object({
   manufacturerSku: z.string().trim().max(120).optional().or(z.literal("")),
 });
 
+const categoryForm = z.object({
+  categoryCode: key,
+  categoryName: z.string().trim().min(2).max(100),
+});
+
+export async function createCatalogCategory(formData: FormData): Promise<void> {
+  await requireUser();
+  const result = categoryForm.safeParse(Object.fromEntries(formData));
+  if (!result.success) redirect("/catalog?categoryError=validation");
+  const input = result.data;
+  await prisma.productCategory.upsert({
+    where: { code: input.categoryCode },
+    update: { name: input.categoryName, isActive: true },
+    create: { code: input.categoryCode, name: input.categoryName, isActive: true },
+  });
+  revalidatePath("/catalog");
+  redirect("/catalog?categoryCreated=1");
+}
+
 export async function createCatalogProduct(formData: FormData): Promise<void> {
   await requireUser();
   const result = form.safeParse(Object.fromEntries(formData));
