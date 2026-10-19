@@ -430,6 +430,12 @@ main { min-width: 0; }
 .radar-errors { margin-top: 6px; }
 .radar-errors summary { cursor: pointer; color: #983737; font-size: 12px; font-weight: 650; }
 .radar-errors ul { margin: 6px 0 0; padding-left: 18px; color: #983737; font-size: 12px; }
+.radar-evaluation { display: inline-flex; align-items: center; width: fit-content; margin-top: 6px; padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: .02em; }
+.radar-evaluation.is-pass { color: #1f6b4a; background: #e8f5ee; }
+.radar-evaluation.is-fail { color: #983737; background: #fbecec; }
+.radar-evaluation.is-unknown { color: #8a5a16; background: #fdf3e2; }
+.radar-reasons { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 6px 0 0; padding: 0; list-style: none; color: #5c6470; font-size: 11px; }
+.radar-review-form { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
 
 .form-hint { margin: -8px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.45; }
 

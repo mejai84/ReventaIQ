@@ -217,6 +217,7 @@ model User {
   reviewedIdentifiers ProductVariantExternalIdentifier[]
   scanProfiles        ScanProfile[]
   triggeredScanRuns   ScanRun[]
+  radarEvidenceReviews RadarEvidenceReview[]
 
   @@index([email])
   @@map("users")
@@ -1088,6 +1089,18 @@ enum RadarRunTrigger {
   SCHEDULED
 }
 
+enum RadarEvaluationStatus {
+  PASS
+  FAIL
+  UNKNOWN
+}
+
+enum RadarReviewStatus {
+  PENDING
+  REVIEWED
+  DISMISSED
+}
+
 enum RadarListingAvailability {
   IN_STOCK
   OUT_OF_STOCK
@@ -1116,6 +1129,7 @@ model ScanProfile {
   sources  ScanProfileSource[]
   targets  ScanProfileTarget[]
   runs     ScanRun[]
+  evidenceReviews RadarEvidenceReview[]
 
   @@unique([userId, name])
   @@index([userId, isActive])
@@ -1251,10 +1265,34 @@ model RadarListingObservation {
   radarListing   RadarListing    @relation(fields: [radarListingId], references: [id], onDelete: Restrict)
   scanSourceRun  ScanSourceRun   @relation(fields: [scanSourceRunId], references: [id], onDelete: Restrict)
   conditionGrade ConditionGrade? @relation(fields: [conditionGradeId], references: [id], onDelete: Restrict)
+  reviews        RadarEvidenceReview[]
 
   @@unique([radarListingId, contentFingerprint])
   @@index([scanSourceRunId])
   @@index([radarListingId, observedAt(sort: Desc)])
   @@index([conditionGradeId])
   @@map("radar_listing_observations")
+}
+
+/// Revision explicita de una observacion bajo un perfil. Guarda la instantanea
+/// de la evaluacion para trazabilidad; no crea oportunidades ni compras.
+model RadarEvidenceReview {
+  id                BigInt                @id @default(autoincrement())
+  observationId     BigInt                @map("observation_id")
+  scanProfileId     BigInt                @map("scan_profile_id")
+  userId            BigInt                @map("user_id")
+  status            RadarReviewStatus     @default(PENDING)
+  evaluationStatus  RadarEvaluationStatus @map("evaluation_status")
+  evaluationReasons Json                  @map("evaluation_reasons")
+  notes             String?               @db.Text
+  createdAt         DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  observation RadarListingObservation @relation(fields: [observationId], references: [id], onDelete: Restrict)
+  scanProfile ScanProfile             @relation(fields: [scanProfileId], references: [id], onDelete: Restrict)
+  user        User                    @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([observationId, scanProfileId])
+  @@index([userId, status, updatedAt(sort: Desc)])
+  @@map("radar_evidence_reviews")
 }

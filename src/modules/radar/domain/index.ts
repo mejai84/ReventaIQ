@@ -1,1 +1,2 @@
-﻿export * from "./radar";
+﻿export * from "./evaluate";
+export * from "./radar";

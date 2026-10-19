@@ -17,6 +17,7 @@ import {
 import { findRadarConnectorByMode, readRadarConnectorEnv } from "@/modules/radar/connectors";
 import {
   deriveListingEvent,
+  evaluateRadarObservation,
   observationFingerprint,
   type ListingCandidate,
 } from "@/modules/radar/domain";
@@ -239,4 +240,53 @@ export async function importRadarCsv(formData: FormData): Promise<void> {
 
   revalidatePath("/radar");
   redirect(hasRowErrors ? "/radar?error=csv-rows" : "/radar?created=import");
+}
+
+/**
+ * Explicit review of one observation under one profile. It records the
+ * evaluation snapshot for traceability and never creates an opportunity,
+ * purchase or marketplace action.
+ */
+export async function reviewRadarEvidence(formData: FormData): Promise<void> {
+  const user = await requireUser();
+  const observationId = id.safeParse(formData.get("observationId"));
+  const profileId = id.safeParse(formData.get("profileId"));
+  if (!observationId.success || !profileId.success) redirect("/radar?error=review-validation");
+
+  const [observation, profile] = await Promise.all([
+    prisma.radarListingObservation.findFirst({
+      where: {
+        id: observationId.data,
+        scanSourceRun: { scanRun: { scanProfileId: profileId.data, scanProfile: { userId: user.id } } },
+      },
+      select: { id: true, price: true, currencyCode: true, availability: true, attributes: true },
+    }),
+    prisma.scanProfile.findFirst({
+      where: { id: profileId.data, userId: user.id, isActive: true },
+      select: {
+        id: true, maxPurchasePriceUsd: true, minimumConfidence: true, minNetProfitCop: true, minRoiRate: true,
+      },
+    }),
+  ]);
+  if (observation === null || profile === null) redirect("/radar?error=review-relation");
+
+  const evaluation = evaluateRadarObservation(observation, profile);
+  const reasons: Prisma.InputJsonValue = evaluation.reasons.map((reason) => ({
+    code: reason.code,
+    outcome: reason.outcome,
+  }));
+
+  await prisma.radarEvidenceReview.upsert({
+    where: { observationId_scanProfileId: { observationId: observation.id, scanProfileId: profile.id } },
+    update: {
+      userId: user.id, status: "REVIEWED", evaluationStatus: evaluation.status, evaluationReasons: reasons,
+    },
+    create: {
+      observationId: observation.id, scanProfileId: profile.id, userId: user.id,
+      status: "REVIEWED", evaluationStatus: evaluation.status, evaluationReasons: reasons,
+    },
+  });
+
+  revalidatePath("/radar");
+  redirect("/radar?reviewed=evidence");
 }
