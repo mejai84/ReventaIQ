@@ -216,6 +216,7 @@ model User {
   /// Identificadores comerciales que esta persona promovio o reviso.
   reviewedIdentifiers ProductVariantExternalIdentifier[]
   scanProfiles        ScanProfile[]
+  triggeredScanRuns   ScanRun[]
 
   @@index([email])
   @@map("users")
@@ -1077,6 +1078,14 @@ enum ScanRunStatus {
   RUNNING
   COMPLETED
   FAILED
+  SKIPPED
+}
+
+/// Origen de una corrida: manual, importacion CSV o cron programado.
+enum RadarRunTrigger {
+  MANUAL
+  CSV
+  SCHEDULED
 }
 
 enum RadarListingAvailability {
@@ -1157,6 +1166,8 @@ model ScanRun {
   mode           RadarSourceMode
   idempotencyKey String          @map("idempotency_key") @db.Text
   status         ScanRunStatus   @default(PENDING)
+  trigger        RadarRunTrigger @default(MANUAL)
+  triggeredByUserId BigInt?      @map("triggered_by_user_id")
   startedAt      DateTime        @default(now()) @map("started_at") @db.Timestamptz(3)
   completedAt    DateTime?       @map("completed_at") @db.Timestamptz(3)
   errorMessage   String?         @map("error_message") @db.Text
@@ -1164,6 +1175,7 @@ model ScanRun {
   updatedAt      DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   scanProfile ScanProfile     @relation(fields: [scanProfileId], references: [id], onDelete: Restrict)
+  triggeredBy User?           @relation(fields: [triggeredByUserId], references: [id], onDelete: Restrict)
   sourceRuns  ScanSourceRun[]
 
   @@unique([scanProfileId, mode, idempotencyKey])

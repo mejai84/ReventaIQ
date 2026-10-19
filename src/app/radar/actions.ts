@@ -84,12 +84,13 @@ function toCandidate(row: RadarCsvRow): ListingCandidate {
  * A CSV that cannot even be parsed still leaves an auditable, sanitized run.
  * Only the fatal code is stored: no header text, no row values, no file path.
  */
-async function recordFatalCsv(profileId: bigint, code: RadarCsvFatalCode, csvText: string): Promise<void> {
+async function recordFatalCsv(profileId: bigint, userId: bigint, code: RadarCsvFatalCode, csvText: string): Promise<void> {
   const idempotencyKey = createHash("sha256").update(`${profileId}:fatal:${code}:${csvText}`).digest("hex");
   try {
     await prisma.$transaction(async (tx) => {
       const run = await tx.scanRun.create({ data: {
-        scanProfileId: profileId, mode: "CSV", idempotencyKey, status: "FAILED", completedAt: new Date(), errorMessage: `csv-${code}`,
+        scanProfileId: profileId, mode: "CSV", idempotencyKey, status: "FAILED", trigger: "CSV", triggeredByUserId: userId,
+        completedAt: new Date(), errorMessage: `csv-${code}`,
       } });
       await tx.scanSourceRun.create({ data: {
         scanRunId: run.id, sourceKey: "csv", mode: "CSV", status: "FAILED", startedAt: new Date(), completedAt: new Date(),
@@ -114,7 +115,7 @@ export async function importRadarCsv(formData: FormData): Promise<void> {
     parsed = parseRadarCsv(csvText.data);
   } catch (error) {
     if (!(error instanceof RadarCsvError)) throw error;
-    await recordFatalCsv(profile.id, error.code, csvText.data);
+    await recordFatalCsv(profile.id, user.id, error.code, csvText.data);
     revalidatePath("/radar");
     redirect("/radar?error=csv-format");
   }
@@ -125,7 +126,7 @@ export async function importRadarCsv(formData: FormData): Promise<void> {
 
   try {
     await prisma.$transaction(async (tx) => {
-      const run = await tx.scanRun.create({ data: { scanProfileId: profile.id, mode: "CSV", idempotencyKey, status: "RUNNING" } });
+      const run = await tx.scanRun.create({ data: { scanProfileId: profile.id, mode: "CSV", idempotencyKey, status: "RUNNING", trigger: "CSV", triggeredByUserId: user.id } });
 
       // Diagnostics belong to a synthetic "csv" source run so valid rows can
       // keep accurate per-source counts without losing the rejected lines.
