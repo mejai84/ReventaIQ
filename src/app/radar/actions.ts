@@ -14,6 +14,7 @@ import {
   type RadarCsvFatalCode,
   type RadarCsvRow,
 } from "@/modules/radar/application";
+import { findRadarConnectorByMode, readRadarConnectorEnv } from "@/modules/radar/connectors";
 import {
   deriveListingEvent,
   observationFingerprint,
@@ -45,6 +46,8 @@ export async function createScanProfile(formData: FormData): Promise<void> {
     input.brandId === "" ? null : prisma.brand.findFirst({ where: { id: input.brandId, isActive: true }, select: { id: true } }),
   ]);
   if (category === null || (input.brandId !== "" && brand === null)) redirect("/radar?error=profile-relation");
+  const connector = findRadarConnectorByMode(input.sourceMode);
+  const sourceIsActive = connector !== undefined && connector.implemented && connector.describe(readRadarConnectorEnv(process.env).env).state === "CONFIGURED";
   try {
     await prisma.scanProfile.create({ data: {
       userId: user.id, categoryId: category.id, ...(brand === null ? {} : { brandId: brand.id }), name: input.name,
@@ -52,7 +55,7 @@ export async function createScanProfile(formData: FormData): Promise<void> {
       ...(input.maxPurchasePriceUsd === "" ? {} : { maxPurchasePriceUsd: input.maxPurchasePriceUsd }),
       minimumConfidence: input.minimumConfidence === "" ? "0" : input.minimumConfidence,
       frequencyMinutes: input.frequencyMinutes,
-      sources: { create: { sourceKey: input.sourceKey, mode: input.sourceMode } },
+      sources: { create: { sourceKey: input.sourceKey, mode: input.sourceMode, isActive: sourceIsActive } },
       targets: { create: { categoryId: category.id } },
     } });
   } catch (error) {
