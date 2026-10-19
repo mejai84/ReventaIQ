@@ -1,7 +1,6 @@
 ﻿import Link from "next/link";
 import { ArrowUpRight, Box, CircleDollarSign, FileSearch, Plus, ShoppingBag } from "@/components/icons";
 import { requireUser } from "@/lib/auth";
-import { logout } from "@/app/login/logout";
 
 const areas = [
   { label: "01", title: "Evaluar oportunidad", description: "Reúne oferta, mercado y logística antes de decidir.", href: "/evaluations/new", icon: FileSearch },
@@ -15,21 +14,6 @@ export default async function DashboardPage() {
 
   return (
     <main className="apple-dashboard">
-      <aside className="apple-dashboard-sidebar" aria-label="Módulos">
-        <Link href="/dashboard" className="apple-wordmark"><span aria-hidden="true">R</span>ReventaIQ</Link>
-        <nav>
-          <Link href="/dashboard">Dashboard</Link>
-          <Link href="/evaluations/new">Nueva evaluación</Link>
-          <Link href="/purchases">Compras</Link>
-          <Link href="/catalog">Catálogo</Link>
-          <Link href="/suppliers">Proveedores</Link>
-          <Link href="/rates">Tasas</Link>
-          <Link href="/shipping">Envío</Link>
-          <Link href="/settings">Configuración</Link>
-        </nav>
-        <form action={logout}><button type="submit">Cerrar sesión</button></form>
-      </aside>
-      <section className="apple-dashboard-main">
       <header className="apple-dashboard-nav">
         <div />
         <div className="apple-dashboard-actions"><Link className="apple-nav-cta" href="/evaluations/new"><Plus size={14} />Nueva evaluación</Link></div>
@@ -43,7 +27,6 @@ export default async function DashboardPage() {
       <section className="apple-dashboard-hero"><div><p className="apple-kicker">SIGUIENTE MOVIMIENTO</p><h2>Convierte un hallazgo<br />en una decisión clara.</h2><p>Reúne oferta, comparables, envío y política de negocio en una evaluación verificable.</p><Link className="apple-blue-pill" href="/evaluations/new">Crear evaluación <ArrowUpRight size={16} /></Link></div><div className="apple-dashboard-orbit" aria-hidden="true"><CircleDollarSign size={128} /><span>REVENTAIQ<br />DECISION ENGINE</span></div></section>
       <section className="apple-dashboard-workflow"><header><p className="apple-kicker">FLUJO DE TRABAJO</p><h2>Empieza donde esté la operación.</h2></header><div>{areas.map(({ label, title, description, href, icon: Icon }) => <Link href={href} key={href}><span>{label}</span><Icon size={22} /><h3>{title}</h3><p>{description}</p><b>Ir al módulo <ArrowUpRight size={15} /></b></Link>)}</div></section>
       <footer className="apple-dashboard-footer"><span>ReventaIQ · operación privada</span><Link href="/settings">Configuración</Link></footer>
-      </section>
     </main>
   );
 }
