@@ -148,6 +148,8 @@ export function parseRadarCsv(text: string): RadarCsvParseResult {
     throw new RadarCsvError("headers");
   }
 
+  if (lines.length === 1) throw new RadarCsvError("empty");
+
   if (lines.length - 1 > MAX_RADAR_CSV_ROWS) throw new RadarCsvError("too-many-rows");
 
   const rows: RadarCsvRow[] = [];
@@ -197,4 +199,50 @@ export function parseRadarCsv(text: string): RadarCsvParseResult {
 
 export function buildRadarCsvTemplate(): string {
   return `${RADAR_CSV_HEADERS.join(",")}\n${RADAR_CSV_EXAMPLE_ROW}\n`;
+}
+
+export const RADAR_CSV_ERROR_LABELS: Readonly<Record<string, string>> = {
+  source_key: "fuente inválida",
+  external_listing_id: "identificador externo inválido",
+  canonical_url: "URL inválida",
+  title: "título inválido o vacío",
+  price: "precio inválido",
+  currency: "moneda inválida",
+  availability: "disponibilidad inválida",
+  observed_at: "fecha observada inválida",
+  identity: "falta identificador externo o URL",
+  empty: "archivo vacío o solo con cabecera",
+  headers: "cabeceras distintas a la plantilla",
+  "too-many-rows": "más de 1.000 filas",
+  quotes: "comillas sin cerrar",
+  row: "fila inválida",
+};
+
+export function describeRadarCsvError(code: string): string {
+  return RADAR_CSV_ERROR_LABELS[code] ?? "fila inválida";
+}
+
+/**
+ * Reads persisted diagnostics defensively. Only `{ row, code }` survives, so a
+ * malformed JSON column can never render arbitrary stored values.
+ */
+export function readRadarCsvErrors(value: unknown): RadarCsvRowError[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.flatMap((item) => {
+    if (typeof item !== "object" || item === null) return [];
+    const row = (item as { row?: unknown }).row;
+    const code = (item as { code?: unknown }).code;
+    if (
+      typeof row !== "number" ||
+      !Number.isInteger(row) ||
+      row < 1 ||
+      typeof code !== "string" ||
+      code.length === 0 ||
+      code.length > 40
+    ) {
+      return [];
+    }
+    return [{ row, code }];
+  });
 }

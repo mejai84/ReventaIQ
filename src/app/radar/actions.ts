@@ -1,12 +1,24 @@
 "use server";
 
 import { createHash } from "node:crypto";
+import Decimal from "decimal.js";
 import { Prisma } from "@/generated/prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import {
+  parseRadarCsv,
+  RadarCsvError,
+  type RadarCsvFatalCode,
+  type RadarCsvRow,
+} from "@/modules/radar/application";
+import {
+  deriveListingEvent,
+  observationFingerprint,
+  type ListingCandidate,
+} from "@/modules/radar/domain";
 
 const id = z.string().regex(/^\d+$/).transform(BigInt);
 const money = z.string().trim().regex(/^\d+(?:\.\d{1,4})?$/);
@@ -51,35 +63,39 @@ export async function createScanProfile(formData: FormData): Promise<void> {
   redirect("/radar?created=profile");
 }
 
-const csvRow = z.object({
-  sourceKey: z.string().trim().toLowerCase().regex(/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/).max(80),
-  externalListingId: z.string().trim().max(200).optional(),
-  canonicalUrl: z.string().trim().url().max(2000).optional(),
-  title: z.string().trim().min(2).max(500),
-  price: z.string().trim().regex(/^\d+(?:\.\d{1,4})?$/).optional(),
-  currencyCode: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/).optional(),
-  availability: z.enum(["IN_STOCK", "OUT_OF_STOCK", "REMOVED", "UNKNOWN"]),
-  observedAt: z.string().datetime({ offset: true }),
-});
-
-function readCsv(value: string): Record<string, string>[] {
-  const lines = value.replace(/^\uFEFF/, "").split(/\r?\n/).filter((line) => line.trim() !== "");
-  if (lines.length < 2 || lines.length > 1001) throw new Error("rows");
-  const parseLine = (line: string) => {
-    const cells: string[] = []; let cell = ""; let quoted = false;
-    for (let index = 0; index < line.length; index += 1) {
-      const char = line[index]!;
-      if (char === '"') { if (quoted && line[index + 1] === '"') { cell += '"'; index += 1; } else quoted = !quoted; }
-      else if (char === "," && !quoted) { cells.push(cell.trim()); cell = ""; }
-      else cell += char;
-    }
-    if (quoted) throw new Error("quotes");
-    cells.push(cell.trim()); return cells;
+function toCandidate(row: RadarCsvRow): ListingCandidate {
+  return {
+    sourceKey: row.sourceKey,
+    ...(row.externalListingId === undefined ? {} : { externalListingId: row.externalListingId }),
+    ...(row.canonicalUrl === undefined ? {} : { canonicalUrl: row.canonicalUrl }),
+    title: row.title,
+    ...(row.price === undefined ? {} : { price: new Decimal(row.price) }),
+    ...(row.currencyCode === undefined ? {} : { currency: row.currencyCode }),
+    availability: row.availability,
+    observedAt: row.observedAt,
+    attributes: {},
   };
-  const headers = parseLine(lines[0]!).map((header) => header.trim());
-  const expected = ["source_key", "external_listing_id", "canonical_url", "title", "price", "currency", "availability", "observed_at"];
-  if (headers.join("|") !== expected.join("|")) throw new Error("headers");
-  return lines.slice(1).map((line) => Object.fromEntries(headers.map((header, index) => [header, parseLine(line)[index] ?? ""])));
+}
+
+/**
+ * A CSV that cannot even be parsed still leaves an auditable, sanitized run.
+ * Only the fatal code is stored: no header text, no row values, no file path.
+ */
+async function recordFatalCsv(profileId: bigint, code: RadarCsvFatalCode, csvText: string): Promise<void> {
+  const idempotencyKey = createHash("sha256").update(`${profileId}:fatal:${code}:${csvText}`).digest("hex");
+  try {
+    await prisma.$transaction(async (tx) => {
+      const run = await tx.scanRun.create({ data: {
+        scanProfileId: profileId, mode: "CSV", idempotencyKey, status: "FAILED", completedAt: new Date(), errorMessage: `csv-${code}`,
+      } });
+      await tx.scanSourceRun.create({ data: {
+        scanRunId: run.id, sourceKey: "csv", mode: "CSV", status: "FAILED", startedAt: new Date(), completedAt: new Date(),
+        errorMessage: `csv-${code}`, errorDetails: [{ row: 1, code }],
+      } });
+    });
+  } catch (error) {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) throw error;
+  }
 }
 
 export async function importRadarCsv(formData: FormData): Promise<void> {
@@ -89,34 +105,134 @@ export async function importRadarCsv(formData: FormData): Promise<void> {
   if (!profileId.success || !csvText.success) redirect("/radar?error=csv-validation");
   const profile = await prisma.scanProfile.findFirst({ where: { id: profileId.data, userId: user.id, isActive: true }, select: { id: true } });
   if (profile === null) redirect("/radar?error=profile-relation");
-  let rows: z.infer<typeof csvRow>[];
+
+  let parsed: ReturnType<typeof parseRadarCsv>;
   try {
-    rows = readCsv(csvText.data).map((row) => csvRow.parse({ sourceKey: row.source_key, externalListingId: row.external_listing_id || undefined, canonicalUrl: row.canonical_url || undefined, title: row.title, price: row.price || undefined, currencyCode: row.currency || undefined, availability: row.availability, observedAt: row.observed_at }));
-    if (rows.some((row) => row.externalListingId === undefined && row.canonicalUrl === undefined)) throw new Error("identity");
-  } catch { redirect("/radar?error=csv-format"); }
-  const key = createHash("sha256").update(`${profile.id}:${csvText.data}`).digest("hex");
+    parsed = parseRadarCsv(csvText.data);
+  } catch (error) {
+    if (!(error instanceof RadarCsvError)) throw error;
+    await recordFatalCsv(profile.id, error.code, csvText.data);
+    revalidatePath("/radar");
+    redirect("/radar?error=csv-format");
+  }
+
+  const idempotencyKey = createHash("sha256").update(`${profile.id}:${csvText.data}`).digest("hex");
+  const rowErrors = parsed.errors.map((error) => ({ row: error.row, code: error.code }));
+  let hasRowErrors = false;
+
   try {
     await prisma.$transaction(async (tx) => {
-      const run = await tx.scanRun.create({ data: { scanProfileId: profile.id, mode: "CSV", idempotencyKey: key, status: "RUNNING" } });
-      for (const [sourceKey, sourceRows] of Object.entries(Object.groupBy(rows, (row) => row.sourceKey))) {
-        const sourceRun = await tx.scanSourceRun.create({ data: { scanRunId: run.id, sourceKey, mode: "CSV", status: "RUNNING", startedAt: new Date(), candidateCount: sourceRows!.length } });
-        let accepted = 0;
-        for (const row of sourceRows!) {
-          const listing = await tx.radarListing.findFirst({ where: { sourceKey, OR: [ ...(row.externalListingId === undefined ? [] : [{ externalListingId: row.externalListingId }]), ...(row.canonicalUrl === undefined ? [] : [{ canonicalUrl: row.canonicalUrl }]) ] } });
-          const saved = listing === null
-            ? await tx.radarListing.create({ data: { sourceKey, ...(row.externalListingId === undefined ? {} : { externalListingId: row.externalListingId }), ...(row.canonicalUrl === undefined ? {} : { canonicalUrl: row.canonicalUrl }), availability: row.availability, lastSeenAt: row.observedAt } })
-            : await tx.radarListing.update({ where: { id: listing.id }, data: { availability: row.availability, lastSeenAt: row.observedAt } });
-          const fingerprint = createHash("sha256").update(JSON.stringify(row)).digest("hex");
-          try { await tx.radarListingObservation.create({ data: { radarListingId: saved.id, scanSourceRunId: sourceRun.id, title: row.title, ...(row.price === undefined ? {} : { price: row.price }), ...(row.currencyCode === undefined ? {} : { currencyCode: row.currencyCode }), availability: row.availability, contentFingerprint: fingerprint, observedAt: row.observedAt } }); accepted += 1; } catch (error) { if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) throw error; }
-        }
-        await tx.scanSourceRun.update({ where: { id: sourceRun.id }, data: { status: "COMPLETED", completedAt: new Date(), acceptedCount: accepted, rejectedCount: sourceRows!.length - accepted } });
+      const run = await tx.scanRun.create({ data: { scanProfileId: profile.id, mode: "CSV", idempotencyKey, status: "RUNNING" } });
+
+      // Diagnostics belong to a synthetic "csv" source run so valid rows can
+      // keep accurate per-source counts without losing the rejected lines.
+      if (parsed.errors.length > 0) {
+        hasRowErrors = true;
+        await tx.scanSourceRun.create({ data: {
+          scanRunId: run.id, sourceKey: "csv", mode: "CSV", status: "COMPLETED",
+          startedAt: new Date(), completedAt: new Date(),
+          candidateCount: parsed.errors.length, acceptedCount: 0, rejectedCount: parsed.errors.length,
+          errorDetails: rowErrors,
+        } });
       }
+
+      for (const [sourceKey, sourceRows] of Object.entries(Object.groupBy(parsed.rows, (row) => row.sourceKey))) {
+        const rows = sourceRows!;
+        const sourceRun = await tx.scanSourceRun.create({ data: {
+          scanRunId: run.id, sourceKey, mode: "CSV", status: "RUNNING", startedAt: new Date(), candidateCount: rows.length,
+        } });
+
+        const externalIds = rows.flatMap((row) => (row.externalListingId === undefined ? [] : [row.externalListingId]));
+        const canonicalUrls = rows.flatMap((row) => (row.canonicalUrl === undefined ? [] : [row.canonicalUrl]));
+        const existingListings = await tx.radarListing.findMany({
+          where: { sourceKey, OR: [
+            ...(externalIds.length === 0 ? [] : [{ externalListingId: { in: externalIds } }]),
+            ...(canonicalUrls.length === 0 ? [] : [{ canonicalUrl: { in: canonicalUrls } }]),
+          ] },
+        });
+
+        type StoredListing = (typeof existingListings)[number];
+        const byExternalId = new Map<string, StoredListing>();
+        const byCanonicalUrl = new Map<string, StoredListing>();
+        for (const listing of existingListings) {
+          if (listing.externalListingId !== null) byExternalId.set(listing.externalListingId, listing);
+          if (listing.canonicalUrl !== null) byCanonicalUrl.set(listing.canonicalUrl, listing);
+        }
+
+        // One query for the latest known observation of every pre-existing
+        // listing in this batch. The map is updated as the batch advances so a
+        // repeated listing still derives its event from the previous row.
+        const previousObservations = existingListings.length === 0 ? [] : await tx.radarListingObservation.findMany({
+          where: { radarListingId: { in: existingListings.map((listing) => listing.id) } },
+          orderBy: [{ observedAt: "desc" }, { id: "desc" }],
+          select: { radarListingId: true, price: true, availability: true },
+        });
+        const latestByListing = new Map<bigint, { price: Decimal | null; availability: StoredListing["availability"] }>();
+        for (const observation of previousObservations) {
+          if (!latestByListing.has(observation.radarListingId)) {
+            latestByListing.set(observation.radarListingId, { price: observation.price, availability: observation.availability });
+          }
+        }
+
+        let accepted = 0;
+        let rejected = 0;
+
+        for (const row of rows) {
+          const candidate = toCandidate(row);
+          let listing = row.externalListingId === undefined ? undefined : byExternalId.get(row.externalListingId);
+          if (listing === undefined && row.canonicalUrl !== undefined) listing = byCanonicalUrl.get(row.canonicalUrl);
+
+          listing = listing === undefined
+            ? await tx.radarListing.create({ data: {
+                sourceKey,
+                ...(row.externalListingId === undefined ? {} : { externalListingId: row.externalListingId }),
+                ...(row.canonicalUrl === undefined ? {} : { canonicalUrl: row.canonicalUrl }),
+                availability: row.availability, lastSeenAt: row.observedAt,
+              } })
+            : await tx.radarListing.update({ where: { id: listing.id }, data: { availability: row.availability, lastSeenAt: row.observedAt } });
+
+          if (listing.externalListingId !== null) byExternalId.set(listing.externalListingId, listing);
+          if (listing.canonicalUrl !== null) byCanonicalUrl.set(listing.canonicalUrl, listing);
+
+          const previous = latestByListing.get(listing.id);
+          const previousForEvent = previous === undefined ? undefined : {
+            ...(previous.price === null ? {} : { price: previous.price }),
+            availability: previous.availability,
+          };
+          const event = deriveListingEvent(previousForEvent, candidate);
+          const fingerprint = observationFingerprint(candidate);
+
+          try {
+            await tx.radarListingObservation.create({ data: {
+              radarListingId: listing.id, scanSourceRunId: sourceRun.id, title: row.title,
+              ...(row.price === undefined ? {} : { price: row.price }),
+              ...(row.currencyCode === undefined ? {} : { currencyCode: row.currencyCode }),
+              availability: row.availability, contentFingerprint: fingerprint,
+              ...(event === undefined ? {} : { eventCode: event }), observedAt: row.observedAt,
+            } });
+            accepted += 1;
+            latestByListing.set(listing.id, { price: row.price === undefined ? null : new Decimal(row.price), availability: row.availability });
+          } catch (error) {
+            if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+              rejected += 1;
+              continue;
+            }
+            throw error;
+          }
+        }
+
+        await tx.scanSourceRun.update({ where: { id: sourceRun.id }, data: {
+          status: "COMPLETED", completedAt: new Date(), acceptedCount: accepted, rejectedCount: rejected,
+        } });
+      }
+
       await tx.scanRun.update({ where: { id: run.id }, data: { status: "COMPLETED", completedAt: new Date() } });
-    });
+    }, { timeout: 30_000, maxWait: 5_000 });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") redirect("/radar?error=csv-duplicate");
     throw error;
   }
+
   revalidatePath("/radar");
-  redirect("/radar?created=import");
+  redirect(hasRowErrors ? "/radar?error=csv-rows" : "/radar?created=import");
 }

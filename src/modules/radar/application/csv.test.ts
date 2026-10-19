@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   buildRadarCsvTemplate,
+  describeRadarCsvError,
   MAX_RADAR_CSV_ROWS,
   parseRadarCsv,
   RadarCsvError,
   RADAR_CSV_HEADERS,
+  readRadarCsvErrors,
 } from "./csv";
 
 const valid = "source_key,external_listing_id,canonical_url,title,price,currency,availability,observed_at\nmanual,PS5-001,https://ejemplo.co/ps5,PS5 Slim,399.99,USD,IN_STOCK,2026-10-19T12:00:00Z";
@@ -71,6 +73,7 @@ describe("parseRadarCsv", () => {
 
   it("rejects empty input and more than the row limit", () => {
     expect(() => parseRadarCsv("")).toThrowError(RadarCsvError);
+    expect(() => parseRadarCsv(RADAR_CSV_HEADERS.join(","))).toThrowError(RadarCsvError);
     const rows = Array.from({ length: MAX_RADAR_CSV_ROWS + 1 }, (_, index) =>
       `manual,X${index},https://ejemplo.co/${index},Title,10.00,USD,IN_STOCK,2026-10-19T12:00:00Z`,
     );
@@ -89,5 +92,22 @@ describe("parseRadarCsv", () => {
     expect(result.errors).toHaveLength(0);
     expect(result.rows).toHaveLength(1);
     expect(buildRadarCsvTemplate().split("\n")[0]).toBe(RADAR_CSV_HEADERS.join(","));
+  });
+
+  it("reads persisted diagnostics defensively", () => {
+    expect(
+      readRadarCsvErrors([
+        { row: 3, code: "price" },
+        { row: 1, code: "headers" },
+        { row: 4, code: "x".repeat(41) },
+        { row: "5", code: "title" },
+        null,
+      ]),
+    ).toEqual([
+      { row: 3, code: "price" },
+      { row: 1, code: "headers" },
+    ]);
+    expect(describeRadarCsvError("price")).toBe("precio inválido");
+    expect(describeRadarCsvError("unknown")).toBe("fila inválida");
   });
 });
