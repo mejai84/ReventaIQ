@@ -23,7 +23,7 @@ import type { ProductOffer } from "../domain/product-offer";
 import { productOfferSchema, type ProductOfferInput } from "../validation/product-offer-schema";
 
 /**
- * ManualConnector — the MVP market source.
+ * ManualConnector â€” the MVP market source.
  *
  * A human types what they see on a marketplace page and ReventaIQ normalizes
  * it exactly like a future API connector would (overview: "La entrada manual
@@ -130,12 +130,9 @@ export class ManualConnector implements MarketConnector {
  * Exported so tests and the future CSV import reuse the exact same path.
  */
 export function buildManualOffer(registration: ManualOfferRegistration): ProductOffer {
+
   const storageGb = normalizeStorageGb(registration.storage ?? registration.title);
-  if (storageGb === undefined) {
-    throw new TypeError(
-      `Manual offer ${registration.referenceId}: storage is required and must be one of 32/64/128/256/512/1024 GB`,
-    );
-  }
+
 
   const marketplace = registration.marketplace ?? "MANUAL";
   const warrantyDays = registration.warrantyDays;
@@ -177,12 +174,16 @@ export function buildManualOffer(registration: ManualOfferRegistration): Product
     seller,
     model,
     variant: registration.title,
-    variantKey: buildVariantKey({ marketplace, model, storageGb }),
-    storageGb,
+    variantKey: buildVariantKey({ marketplace, model, ...(storageGb === undefined ? {} : { storageGb }) }),
+    ...(storageGb === undefined ? {} : { storageGb }),
+    attributes: {
+      ...(storageGb === undefined ? {} : { storage_gb: storageGb }),
+      ...(batteryHealthRate === undefined ? {} : { battery_health_percent: batteryHealthRate.times(DECIMAL_HUNDRED).toNumber() }),
+    },
     condition,
     ...(batteryHealthRate === undefined ? {} : { batteryHealthRate }),
     ...(carrier === undefined ? {} : { carrier }),
-    simFormat,
+    ...(registration.simText === undefined ? {} : { simFormat }),
     priceUSD,
     shippingUSD,
     salesTaxUSD,
@@ -231,13 +232,14 @@ export function toWireOffer(offer: ProductOffer): ProductOfferInput {
     model: offer.model,
     variant: offer.variant,
     variantKey: offer.variantKey,
-    storageGb: offer.storageGb,
+    ...(offer.storageGb === undefined ? {} : { storageGb: offer.storageGb }),
+    attributes: offer.attributes,
     condition: offer.condition,
     ...(offer.batteryHealthRate === undefined ? {} : { batteryHealthRate: offer.batteryHealthRate.toFixed() }),
     ...(offer.carrier === undefined
       ? {}
       : { carrier: { name: offer.carrier.name, lockState: offer.carrier.lockState } }),
-    simFormat: offer.simFormat,
+    ...(offer.simFormat === undefined ? {} : { simFormat: offer.simFormat }),
     priceUSD: offer.priceUSD.toFixed(),
     shippingUSD: offer.shippingUSD.toFixed(),
     salesTaxUSD: offer.salesTaxUSD.toFixed(),

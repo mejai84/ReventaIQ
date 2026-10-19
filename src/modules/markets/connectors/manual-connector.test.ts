@@ -76,7 +76,7 @@ describe("ManualConnector normalization", () => {
     expect(offer.carrier?.lockState).toBe("UNLOCKED");
     expect(offer.batteryHealthRate?.toFixed()).toBe("0.92");
     expect(offer.seller.ratingRate?.toFixed()).toBe("0.992");
-    expect(offer.variantKey).toBe("ebay:iphone-15-pro-128");
+    expect(offer.variantKey).toBe("iphone-15-pro-128");
     expect(offer.observedAt).toBe(VALID.observedAt);
     expect(offer.fetchedAt).toBe(VALID.registeredAt);
   });
@@ -96,17 +96,13 @@ describe("ManualConnector normalization", () => {
     });
 
     expect(offer.condition).toBe("UNKNOWN");
-    expect(offer.simFormat).toBe("UNKNOWN");
+    expect(offer.simFormat).toBeUndefined();
     expect(offer.carrier).toBeUndefined();
     expect(offer.batteryHealthRate).toBeUndefined();
     expect(offer.seller.ratingRate).toBeUndefined();
     expect(offer.warrantyDays).toBeUndefined();
     expect(isOfferIncomplete(offer)).toBe(true);
-    expect(offerGaps(offer)).toEqual([
-      "CONDITION_UNKNOWN",
-      "SIM_FORMAT_UNKNOWN",
-      "CARRIER_UNKNOWN",
-    ]);
+    expect(offerGaps(offer)).toEqual(["CONDITION_UNKNOWN"]);
   });
 
   it("requires shipping and tax to be stated explicitly, including zero", () => {
@@ -131,10 +127,10 @@ describe("ManualConnector normalization", () => {
 });
 
 describe("ManualConnector validation", () => {
-  it("rejects a missing storage capacity", () => {
-    expect(() =>
-      buildManualOffer({ ...withoutOptional(VALID, ["storage"]), title: "iPhone 15 Pro" }),
-    ).toThrow(TypeError);
+  it("allows a product without a storage attribute", () => {
+    const offer = buildManualOffer({ ...withoutOptional(VALID, ["storage"]), title: "PlayStation 5 Slim Disc", model: "PlayStation 5 Slim" });
+    expect(offer.storageGb).toBeUndefined();
+    expect(offer.variantKey).toBe("playstation-5-slim");
   });
 
   it("rejects malformed money and dates", () => {

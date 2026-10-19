@@ -69,11 +69,7 @@ describe("ProductOffer", () => {
       registeredAt: "2026-01-15T15:00:00.000Z",
     });
     expect(isOfferIncomplete(incomplete)).toBe(true);
-    expect(offerGaps(incomplete)).toEqual([
-      "CONDITION_UNKNOWN",
-      "SIM_FORMAT_UNKNOWN",
-      "CARRIER_UNKNOWN",
-    ]);
+    expect(offerGaps(incomplete)).toEqual(["CONDITION_UNKNOWN"]);
   });
 });
 

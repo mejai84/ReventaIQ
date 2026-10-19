@@ -85,7 +85,7 @@ export interface CatalogMatch {
 export type VariantResolver = (variantKey: string) => CatalogMatch | undefined;
 
 export interface CatalogEntry {
-  /** `ProductOffer.variantKey`, e.g. `ebay:iphone-15-pro-128`. */
+  /** `ProductOffer.variantKey`, e.g. `iphone-15-pro-128`. */
   readonly variantKey: string;
   readonly productVariantId: string;
   readonly supplierId: string;
@@ -218,6 +218,7 @@ export type MarketOfferConversion =
 const DROPPED_SOURCE_DETAILS: readonly string[] = [
   "marketplace",
   "storageGb",
+  "attributes",
   "variant",
   "variantKey",
   "externalId",
@@ -255,7 +256,7 @@ export function toOpportunityOffer(
   // 2. Carrier lock: the engine contract has no lock field, so a locked or
   //    unknown device is a different product and must not be evaluated as if
   //    it were unlocked.
-  if (policy.requireUnlockedCarrier !== false) {
+  if (policy.requireUnlockedCarrier === true) {
     const lockState = offer.carrier?.lockState ?? "UNKNOWN";
     if (lockState === "UNKNOWN") {
       blockers.push("CARRIER_LOCK_UNKNOWN");
@@ -319,7 +320,7 @@ export function toOpportunityOffer(
       message: "Carrier identity has no field in the engine offer; only the lock state was checked.",
     });
   }
-  if (offer.simFormat !== "UNKNOWN") {
+  if (offer.simFormat !== undefined && offer.simFormat !== "UNKNOWN") {
     notes.push({
       code: "SIM_FORMAT_NOT_REPRESENTED",
       message: "SIM format has no field in the engine offer.",

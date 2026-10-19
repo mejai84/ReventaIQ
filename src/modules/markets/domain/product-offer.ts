@@ -117,12 +117,16 @@ export interface ProductOffer {
   readonly variant: string;
   /** Canonical variant key used to group comparable offers. */
   readonly variantKey: string;
-  readonly storageGb: StorageGb;
+  /** Optional category attribute; e.g. 1 TB for a PS5, absent when irrelevant. */
+  readonly storageGb?: StorageGb;
+  /** Category-specific observed attributes. No phone attribute is universal. */
+  readonly attributes: Readonly<Record<string, string | number | boolean>>;
   readonly condition: OfferCondition;
   /** Fraction in [0, 1] of remaining battery capacity, when reported. */
   readonly batteryHealthRate?: Decimal;
   readonly carrier?: CarrierProfile;
-  readonly simFormat: SimFormat;
+  /** Present only when SIM technology applies to this category. */
+  readonly simFormat?: SimFormat;
   /** Listed item price in USD, excluding shipping and tax. */
   readonly priceUSD: Decimal;
   /** Shipping charged by the marketplace, in USD. */
@@ -159,25 +163,8 @@ export function isOfferIncomplete(offer: ProductOffer): boolean {
 }
 
 /** Reason codes for an incomplete offer, useful for audit trails and UI. */
-export type OfferGapCode =
-  | "CONDITION_UNKNOWN"
-  | "SIM_FORMAT_UNKNOWN"
-  | "CARRIER_UNKNOWN"
-  | "CARRIER_LOCK_UNKNOWN";
+export type OfferGapCode = "CONDITION_UNKNOWN";
 
 export function offerGaps(offer: ProductOffer): readonly OfferGapCode[] {
-  const gaps: OfferGapCode[] = [];
-  if (offer.condition === "UNKNOWN") {
-    gaps.push("CONDITION_UNKNOWN");
-  }
-  if (offer.simFormat === "UNKNOWN") {
-    gaps.push("SIM_FORMAT_UNKNOWN");
-  }
-  // A missing carrier profile is as unknown as an unparsable lock statement.
-  if (offer.carrier === undefined) {
-    gaps.push("CARRIER_UNKNOWN");
-  } else if (offer.carrier.lockState === "UNKNOWN") {
-    gaps.push("CARRIER_LOCK_UNKNOWN");
-  }
-  return gaps;
+  return offer.condition === "UNKNOWN" ? ["CONDITION_UNKNOWN"] : [];
 }

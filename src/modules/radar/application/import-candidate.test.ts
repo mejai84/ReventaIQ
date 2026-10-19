@@ -1,0 +1,8 @@
+﻿import Decimal from "decimal.js";
+import { describe, expect, it } from "vitest";
+import { importRadarCandidate, type RadarStore } from "./import-candidate";
+import type { Listing, ListingObservation } from "../domain";
+
+function store(): RadarStore & { observations: ListingObservation[] } { const listings = new Map<string, Listing>(); const observations: ListingObservation[] = []; return { observations, findListing: (id) => listings.get(id), latestObservation: (id) => observations.filter((item) => item.listingId === id).at(-1), saveListing: (item) => listings.set(item.id, item), saveObservation: (item) => observations.push(item) }; }
+const candidate = { sourceKey: "csv", externalListingId: "1", title: "PS5 Slim Disc 1 TB", price: new Decimal("420"), currency: "USD", availability: "IN_STOCK" as const, observedAt: "2026-10-19T00:00:00Z", attributes: { edition: "DISC", storage_gb: 1024 } };
+describe("importRadarCandidate", () => { it("is idempotent for the same effective CSV row", () => { const memory = store(); expect(importRadarCandidate(memory, candidate).observation?.event).toBe("NEW_LISTING"); expect(importRadarCandidate(memory, candidate).observation).toBeUndefined(); expect(memory.observations).toHaveLength(1); }); it("retains a price drop as a second immutable observation", () => { const memory = store(); importRadarCandidate(memory, candidate); const result = importRadarCandidate(memory, { ...candidate, price: new Decimal("399"), observedAt: "2026-10-19T06:00:00Z" }); expect(result.observation?.event).toBe("PRICE_DROP"); expect(memory.observations).toHaveLength(2); }); });

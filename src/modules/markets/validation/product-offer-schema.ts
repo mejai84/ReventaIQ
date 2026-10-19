@@ -66,7 +66,8 @@ export const productOfferSchema = z
         z.ZodLiteral<StorageGb>,
         ...z.ZodLiteral<StorageGb>[],
       ],
-    ),
+    ).optional(),
+    attributes: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
     condition: z.enum(OFFER_CONDITIONS),
     batteryHealthRate: rateSchema.optional(),
     carrier: z
@@ -75,7 +76,7 @@ export const productOfferSchema = z
         lockState: z.enum(CARRIER_LOCK_STATES),
       })
       .optional(),
-    simFormat: z.enum(SIM_FORMATS),
+    simFormat: z.enum(SIM_FORMATS).optional(),
     priceUSD: moneyUsdSchema,
     shippingUSD: moneyUsdSchema,
     salesTaxUSD: moneyUsdSchema,

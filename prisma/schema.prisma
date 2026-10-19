@@ -193,17 +193,17 @@ enum IdentifierPromotionStatus {
 
 /// Identidad local del operador. Sin contrasenas ni secretos de sesion.
 model User {
-  id          BigInt   @id @default(autoincrement())
+  id           BigInt   @id @default(autoincrement())
   /// Normalizado en aplicacion. La unicidad real es UNIQUE sobre
   /// lower(email) y va en SQL manual (checklist 5 y 6).
-  email       String   @db.Text
-  displayName String   @map("display_name") @db.Text
-  authSubject String?  @unique @map("auth_subject") @db.Text
-  passwordHash String? @map("password_hash") @db.Text
-  role        UserRole @default(ADMIN)
-  isActive    Boolean  @default(true) @map("is_active")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  email        String   @db.Text
+  displayName  String   @map("display_name") @db.Text
+  authSubject  String?  @unique @map("auth_subject") @db.Text
+  passwordHash String?  @map("password_hash") @db.Text
+  role         UserRole @default(ADMIN)
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   businessSettings    BusinessSettings[]
   conditionGrades     ConditionGrade[]
@@ -215,6 +215,7 @@ model User {
   purchaseEvents      PurchaseEvent[]
   /// Identificadores comerciales que esta persona promovio o reviso.
   reviewedIdentifiers ProductVariantExternalIdentifier[]
+  scanProfiles        ScanProfile[]
 
   @@index([email])
   @@map("users")
@@ -277,11 +278,12 @@ model ConditionGrade {
   createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  user           User            @relation(fields: [userId], references: [id], onDelete: Restrict)
-  category       ProductCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  supplierOffers SupplierOffer[]
-  marketListings MarketListing[]
-  purchases      Purchase[]
+  user              User                      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  category          ProductCategory           @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  supplierOffers    SupplierOffer[]
+  marketListings    MarketListing[]
+  purchases         Purchase[]
+  radarObservations RadarListingObservation[]
 
   @@unique([userId, categoryId, code])
   @@index([categoryId, userId, rank])
@@ -304,6 +306,8 @@ model ProductCategory {
   attributeDefinitions AttributeDefinition[]
   conditionGrades      ConditionGrade[]
   products             Product[]
+  scanProfiles         ScanProfile[]
+  scanProfileTargets   ScanProfileTarget[]
 
   @@map("product_categories")
 }
@@ -317,7 +321,8 @@ model Brand {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  products Product[]
+  products     Product[]
+  scanProfiles ScanProfile[]
 
   @@map("brands")
 }
@@ -341,9 +346,10 @@ model Product {
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  brand    Brand            @relation(fields: [brandId], references: [id], onDelete: Restrict)
-  category ProductCategory  @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  variants ProductVariant[]
+  brand              Brand               @relation(fields: [brandId], references: [id], onDelete: Restrict)
+  category           ProductCategory     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  variants           ProductVariant[]
+  scanProfileTargets ScanProfileTarget[]
 
   @@index([brandId])
   @@index([categoryId])
@@ -395,6 +401,8 @@ model ProductVariant {
   /// Identificadores canonicos promovidos desde observaciones. Vacio es lo
   /// normal: la mayoria de variantes no tendran ningun.
   externalIdentifiers ProductVariantExternalIdentifier[]
+  scanProfileTargets  ScanProfileTarget[]
+  radarListings       RadarListing[]
 
   @@index([productId, isActive])
   @@map("product_variants")
@@ -778,7 +786,7 @@ model SalesChannel {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  costProfiles SalesCostProfile[]
+  costProfiles   SalesCostProfile[]
   marketListings MarketListing[]
 
   @@map("sales_channels")
@@ -1050,4 +1058,188 @@ model Shipment {
   @@index([shippingProviderId])
   @@index([shippingQuoteId])
   @@map("shipments")
+}
+
+// ---------------------------------------------------------------------------
+// Radar R1: profiles, runs and immutable market evidence.
+// ---------------------------------------------------------------------------
+
+enum RadarSourceMode {
+  API
+  WEB_PUBLIC
+  FEED
+  MANUAL
+  CSV
+}
+
+enum ScanRunStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum RadarListingAvailability {
+  IN_STOCK
+  OUT_OF_STOCK
+  REMOVED
+  UNKNOWN
+}
+
+model ScanProfile {
+  id                  BigInt   @id @default(autoincrement())
+  userId              BigInt   @map("user_id")
+  categoryId          BigInt   @map("category_id")
+  brandId             BigInt?  @map("brand_id")
+  name                String   @db.Text
+  isActive            Boolean  @default(true) @map("is_active")
+  frequencyMinutes    Int      @default(1440) @map("frequency_minutes")
+  minNetProfitCop     Decimal  @map("min_net_profit_cop") @db.Decimal(20, 4)
+  minRoiRate          Decimal  @map("min_roi_rate") @db.Decimal(18, 8)
+  maxPurchasePriceUsd Decimal? @map("max_purchase_price_usd") @db.Decimal(20, 4)
+  minimumConfidence   Decimal  @default(0) @map("minimum_confidence") @db.Decimal(7, 4)
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user     User                @relation(fields: [userId], references: [id], onDelete: Restrict)
+  category ProductCategory     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  brand    Brand?              @relation(fields: [brandId], references: [id], onDelete: Restrict)
+  sources  ScanProfileSource[]
+  targets  ScanProfileTarget[]
+  runs     ScanRun[]
+
+  @@unique([userId, name])
+  @@index([userId, isActive])
+  @@index([categoryId])
+  @@index([brandId])
+  @@map("scan_profiles")
+}
+
+model ScanProfileSource {
+  id            BigInt          @id @default(autoincrement())
+  scanProfileId BigInt          @map("scan_profile_id")
+  sourceKey     String          @map("source_key") @db.Text
+  mode          RadarSourceMode
+  isActive      Boolean         @default(true) @map("is_active")
+  createdAt     DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  scanProfile ScanProfile @relation(fields: [scanProfileId], references: [id], onDelete: Restrict)
+
+  @@unique([scanProfileId, sourceKey])
+  @@index([sourceKey, isActive])
+  @@map("scan_profile_sources")
+}
+
+model ScanProfileTarget {
+  id               BigInt   @id @default(autoincrement())
+  scanProfileId    BigInt   @map("scan_profile_id")
+  categoryId       BigInt   @map("category_id")
+  productId        BigInt?  @map("product_id")
+  productVariantId BigInt?  @map("product_variant_id")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  scanProfile    ScanProfile     @relation(fields: [scanProfileId], references: [id], onDelete: Restrict)
+  category       ProductCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  product        Product?        @relation(fields: [productId], references: [id], onDelete: Restrict)
+  productVariant ProductVariant? @relation(fields: [productVariantId], references: [id], onDelete: Restrict)
+
+  @@index([scanProfileId])
+  @@index([categoryId])
+  @@index([productId])
+  @@index([productVariantId])
+  @@map("scan_profile_targets")
+}
+
+model ScanRun {
+  id             BigInt          @id @default(autoincrement())
+  scanProfileId  BigInt          @map("scan_profile_id")
+  mode           RadarSourceMode
+  idempotencyKey String          @map("idempotency_key") @db.Text
+  status         ScanRunStatus   @default(PENDING)
+  startedAt      DateTime        @default(now()) @map("started_at") @db.Timestamptz(3)
+  completedAt    DateTime?       @map("completed_at") @db.Timestamptz(3)
+  errorMessage   String?         @map("error_message") @db.Text
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  scanProfile ScanProfile     @relation(fields: [scanProfileId], references: [id], onDelete: Restrict)
+  sourceRuns  ScanSourceRun[]
+
+  @@unique([scanProfileId, mode, idempotencyKey])
+  @@index([scanProfileId, status, startedAt(sort: Desc)])
+  @@map("scan_runs")
+}
+
+model ScanSourceRun {
+  id             BigInt          @id @default(autoincrement())
+  scanRunId      BigInt          @map("scan_run_id")
+  sourceKey      String          @map("source_key") @db.Text
+  mode           RadarSourceMode
+  status         ScanRunStatus   @default(PENDING)
+  candidateCount Int             @default(0) @map("candidate_count")
+  acceptedCount  Int             @default(0) @map("accepted_count")
+  rejectedCount  Int             @default(0) @map("rejected_count")
+  startedAt      DateTime?       @map("started_at") @db.Timestamptz(3)
+  completedAt    DateTime?       @map("completed_at") @db.Timestamptz(3)
+  errorMessage   String?         @map("error_message") @db.Text
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  scanRun      ScanRun                   @relation(fields: [scanRunId], references: [id], onDelete: Restrict)
+  observations RadarListingObservation[]
+
+  @@unique([scanRunId, sourceKey])
+  @@index([sourceKey, status])
+  @@map("scan_source_runs")
+}
+
+model RadarListing {
+  id                BigInt                   @id @default(autoincrement())
+  sourceKey         String                   @map("source_key") @db.Text
+  externalListingId String?                  @map("external_listing_id") @db.Text
+  canonicalUrl      String?                  @map("canonical_url") @db.Text
+  sellerExternalId  String?                  @map("seller_external_id") @db.Text
+  productVariantId  BigInt?                  @map("product_variant_id")
+  availability      RadarListingAvailability @default(UNKNOWN)
+  createdAt         DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastSeenAt        DateTime                 @map("last_seen_at") @db.Timestamptz(3)
+  updatedAt         DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  productVariant ProductVariant?           @relation(fields: [productVariantId], references: [id], onDelete: Restrict)
+  observations   RadarListingObservation[]
+
+  @@unique([sourceKey, externalListingId])
+  @@unique([sourceKey, canonicalUrl])
+  @@index([productVariantId, lastSeenAt(sort: Desc)])
+  @@index([sourceKey, lastSeenAt(sort: Desc)])
+  @@map("radar_listings")
+}
+
+model RadarListingObservation {
+  id                 BigInt                   @id @default(autoincrement())
+  radarListingId     BigInt                   @map("radar_listing_id")
+  scanSourceRunId    BigInt                   @map("scan_source_run_id")
+  conditionGradeId   BigInt?                  @map("condition_grade_id")
+  title              String                   @db.Text
+  sourceCondition    String?                  @map("source_condition") @db.Text
+  price              Decimal?                 @db.Decimal(20, 4)
+  currencyCode       String?                  @map("currency_code") @db.Char(3)
+  availability       RadarListingAvailability @default(UNKNOWN)
+  attributes         Json                     @default("{}")
+  rawPayload         Json?                    @map("raw_payload")
+  contentFingerprint String                   @map("content_fingerprint") @db.Text
+  eventCode          String?                  @map("event_code") @db.Text
+  observedAt         DateTime                 @map("observed_at") @db.Timestamptz(3)
+  createdAt          DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  radarListing   RadarListing    @relation(fields: [radarListingId], references: [id], onDelete: Restrict)
+  scanSourceRun  ScanSourceRun   @relation(fields: [scanSourceRunId], references: [id], onDelete: Restrict)
+  conditionGrade ConditionGrade? @relation(fields: [conditionGradeId], references: [id], onDelete: Restrict)
+
+  @@unique([radarListingId, contentFingerprint])
+  @@index([scanSourceRunId])
+  @@index([radarListingId, observedAt(sort: Desc)])
+  @@index([conditionGradeId])
+  @@map("radar_listing_observations")
 }

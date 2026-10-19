@@ -17,12 +17,12 @@ import {
 
 const CATALOG = [
   {
-    variantKey: "ebay:iphone-15-pro-128",
+    variantKey: "iphone-15-pro-128",
     productVariantId: "variant-iphone-15-pro-128",
     supplierId: "supplier-ebay-pool",
   },
   {
-    variantKey: "best_buy:iphone-13-128",
+    variantKey: "iphone-13-128",
     productVariantId: "variant-iphone-13-128",
     supplierId: "supplier-best-buy",
   },
@@ -344,8 +344,8 @@ describe("catalog resolution", () => {
   it("lets the last catalog snapshot win for a duplicated key", () => {
     expect(() =>
       buildCatalogResolver([
-        { variantKey: "ebay:iphone-15-pro-128", productVariantId: "v-old", supplierId: "s-old" },
-        { variantKey: "ebay:iphone-15-pro-128", productVariantId: "v-new", supplierId: "s-new" },
+        { variantKey: "iphone-15-pro-128", productVariantId: "v-old", supplierId: "s-old" },
+        { variantKey: "iphone-15-pro-128", productVariantId: "v-new", supplierId: "s-new" },
       ]),
     ).toThrow(RangeError);
   });
@@ -396,20 +396,20 @@ describe("policy validation", () => {
     ).toThrow();
   });
 
-  it("is enabled by default when requireUnlockedCarrier is omitted", () => {
+  it("only enforces carrier lock when category policy requires it", () => {
     const locked = toOpportunityOffer(
       buildManualOffer(registration({ carrierLockText: "Carrier locked" })),
       { paymentFeeUSD: new Decimal("0") },
       resolveVariant,
     );
-    expect(blockerCodes(locked)).toEqual(["CARRIER_LOCKED"]);
+    expect(locked.status).toBe("READY");
 
     const unknownLock = toOpportunityOffer(
       buildManualOffer(registration({ carrierLockText: "no informado" })),
-      { paymentFeeUSD: new Decimal("0"), requireUnlockedCarrier: false },
+      { paymentFeeUSD: new Decimal("0"), requireUnlockedCarrier: true },
       resolveVariant,
     );
-    expect(unknownLock.status).toBe("READY");
+    expect(blockerCodes(unknownLock)).toEqual(["CARRIER_LOCK_UNKNOWN"]);
   });
 
   it("flags absent extra costs as unknown instead of assuming none", () => {

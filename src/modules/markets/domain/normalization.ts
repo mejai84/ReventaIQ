@@ -256,15 +256,16 @@ export function slugify(value: string): string {
  * Opportunity Engine compares them through `condition`.
  */
 export function buildVariantKey(input: {
-  readonly marketplace: MarketplaceId;
+  /** Deprecated compatibility input. Source identity never enters the result. */
+  readonly marketplace?: MarketplaceId;
   readonly model: string;
-  readonly storageGb: StorageGb;
+  readonly storageGb?: StorageGb;
 }): string {
   const model = slugify(input.model);
   if (model.length === 0) {
     throw new TypeError("model is required to build a variant key");
   }
-  return `${input.marketplace.toLowerCase()}:${model}-${input.storageGb}`;
+  return input.storageGb === undefined ? model : `${model}-${input.storageGb}`;
 }
 
 /** Grouping key across marketplaces: `iphone-15-pro-128`. */

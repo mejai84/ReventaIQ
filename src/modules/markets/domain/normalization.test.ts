@@ -91,10 +91,10 @@ describe("normalizeStorageGb", () => {
 describe("variant keys", () => {
   it("scopes the variant key to the marketplace", () => {
     expect(buildVariantKey({ marketplace: "EBAY", model: "iPhone 15 Pro", storageGb: 128 })).toBe(
-      "ebay:iphone-15-pro-128",
+      "iphone-15-pro-128",
     );
     expect(buildVariantKey({ marketplace: "BEST_BUY", model: "iPhone 15 Pro", storageGb: 128 })).toBe(
-      "best_buy:iphone-15-pro-128",
+      "iphone-15-pro-128",
     );
   });
 
