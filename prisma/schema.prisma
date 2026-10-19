@@ -1183,6 +1183,9 @@ model ScanSourceRun {
   startedAt      DateTime?       @map("started_at") @db.Timestamptz(3)
   completedAt    DateTime?       @map("completed_at") @db.Timestamptz(3)
   errorMessage   String?         @map("error_message") @db.Text
+  /// Diagnosticos por fila de una importacion CSV: [{ row, code }]. Nunca
+  /// incluye el valor de la celda, solo la linea y un codigo estable.
+  errorDetails   Json?           @map("error_details")
   createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt      DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
 
