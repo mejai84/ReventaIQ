@@ -1,10 +1,9 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@/generated/prisma/client";
+import { resolveDatabaseConnectionConfig } from "@/lib/database-config";
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
-const connectionString = process.env.DATABASE_URL;
-if (connectionString === undefined || connectionString.length === 0) {
-  console.error("Login/database startup: DATABASE_URL is missing or empty (runtime env).");
-}
-export const prisma = globalForPrisma.prisma ?? new PrismaClient({ adapter: new PrismaPg({ connectionString: connectionString ?? "" }) });
+const connection = resolveDatabaseConnectionConfig(process.env.DATABASE_URL);
+
+export const prisma = globalForPrisma.prisma ?? new PrismaClient({ adapter: new PrismaPg(connection) });
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
