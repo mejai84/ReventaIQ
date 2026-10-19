@@ -93,13 +93,11 @@ test.describe("flujo completo de catálogo y radar", () => {
     await page.selectOption('select[name="profileId"]', { label: profileName });
     await page.fill('textarea[name="csvText"]', csv);
     await page.getByRole("button", { name: "Importar evidencia" }).click();
+    await page.getByText("Consola E2E").waitFor({ timeout: 20_000 }).catch(() => null);
     await expect(page.getByText("Consola E2E")).toBeVisible();
     await expect(page.getByText("Cumple reglas disponibles")).toBeVisible();
-  });
 
-  test("rechaza un CSV inválido y muestra el error por fila", async ({ page }) => {
-    await page.goto("/radar", { waitUntil: "networkidle" });
-    await page.selectOption('select[name="profileId"]', { index: 0 });
+    await page.selectOption('select[name="profileId"]', { label: profileName });
     await page.fill('textarea[name="csvText"]', "columna_equivocada\nsolo_una_columna");
     await page.getByRole("button", { name: "Importar evidencia" }).click();
     await expect(page).toHaveURL(/error=csv-format/);

@@ -213,6 +213,7 @@ export async function importRadarCsv(formData: FormData): Promise<void> {
               ...(row.price === undefined ? {} : { price: row.price }),
               ...(row.currencyCode === undefined ? {} : { currencyCode: row.currencyCode }),
               availability: row.availability, contentFingerprint: fingerprint,
+              attributes: candidate.attributes as Prisma.InputJsonValue,
               ...(event === undefined ? {} : { eventCode: event }), observedAt: row.observedAt,
             } });
             accepted += 1;
