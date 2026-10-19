@@ -1,7 +1,7 @@
 import Decimal from "decimal.js";
 import { z } from "zod";
 
-import type { ClassificationRule, OpportunityScoringSettings } from "@/modules/finance/contracts";
+import type { ClassificationRule } from "@/modules/finance/contracts";
 import type { SaleChannel } from "@/modules/opportunities/domain";
 
 const decimalText = z.string().regex(/^-?\d+(?:\.\d{1,8})?$/).transform((value) => new Decimal(value));

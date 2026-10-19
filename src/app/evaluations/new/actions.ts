@@ -7,7 +7,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { analyzeOpportunity, type OpportunityAnalysis, type OpportunityEngineInput, type SaleChannel } from "@/modules/opportunities/domain";
+import { analyzeOpportunity, type OpportunityEngineInput, type SaleChannel } from "@/modules/opportunities/domain";
 import { isCondition, isSaleChannel, parseEvaluationPolicy } from "./policy";
 
 const idSchema = z.string().regex(/^\d+$/).transform(BigInt);
