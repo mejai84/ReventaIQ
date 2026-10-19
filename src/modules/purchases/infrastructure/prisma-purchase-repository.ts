@@ -1,6 +1,6 @@
 import Decimal from "decimal.js";
 
-import type { NewPurchaseRecord, NewShipmentRecord, PurchaseAggregate, PurchaseListPage, PurchaseListQuery, PurchaseRepository, PurchaseTransaction, PurchaseUpdate, ShipmentUpdate } from "../application/purchase-repository";
+import type { NewPurchaseRecord, PurchaseAggregate, PurchaseListPage, PurchaseRepository, PurchaseTransaction } from "../application/purchase-repository";
 
 import type { PurchaseEvent as DomainPurchaseEvent } from "../domain";
 import type { PurchaseEventCode } from "../domain";

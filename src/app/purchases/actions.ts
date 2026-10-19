@@ -10,14 +10,10 @@ import { prismaPurchaseRepository } from "@/modules/purchases/infrastructure/pri
 import {
   assertPurchaseConsistency,
   assertPurchaseTransition,
-  availablePurchaseActions,
   canCancel,
   canReopen,
   deriveAutomaticEvents,
   nextPurchaseStatus,
-  type PurchaseAction,
-  type PurchaseMoneyComponents,
-  type PurchaseShipmentView,
   type PurchaseStatus,
   type PurchaseView,
   userEventForAction,
@@ -31,17 +27,6 @@ const moneyText = z
   .regex(/^(\d+(?:\.\d{1,4})?)?$/u)
   .optional()
   .transform((v) => (v === undefined || v === "" ? undefined : new Decimal(v)));
-
-function moneyFromInput(input: Partial<Record<string, string>>) {
-  const get = (k: string) => ((input[k] ?? "").trim() === "" ? undefined : new Decimal(input[k]!.trim()));
-  return {
-    purchasePriceUSD: get("purchasePriceUSD"),
-    usShippingUSD: get("usShippingUSD"),
-    usSalesTaxUSD: get("usSalesTaxUSD"),
-    paymentFeeUSD: get("paymentFeeUSD"),
-    otherCostUSD: get("otherCostUSD"),
-  } as PurchaseMoneyComponents;
-}
 
 async function loadOwnedPurchase(user: { id: bigint }, id: string): Promise<PurchaseAggregate | undefined> {
   const idNum = id.trim();
