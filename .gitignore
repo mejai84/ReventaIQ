@@ -43,3 +43,9 @@ npm-debug.log*
 /src/generated/prisma
 
 .vercel
+
+# Local agent skill installations (downloaded copies, not repository config)
+.agents/skills/
+.claude/skills/
+.windsurf/skills/
+skills-lock.json
