@@ -11,7 +11,7 @@ export default function HomePage() {
         <Link className="apple-wordmark" href="/" aria-label="ReventaIQ, inicio"><span aria-hidden="true">R</span>ReventaIQ</Link>
         <Link href="/dashboard">Acceder <ArrowUpRight size={14} /></Link>
       </nav>
-      <section className="apple-local-nav"><b>ReventaIQ</b><Link href="/dashboard" className="apple-nav-cta">Abrir dashboard</Link></section>
+
       <section className="apple-hero" aria-labelledby="hero-title">
         <p className="apple-kicker">OPERACIONES DE REVENTA</p>
         <h1 id="hero-title">Tecnología bien<br />decidida.</h1>
