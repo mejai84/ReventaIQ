@@ -77,7 +77,7 @@ function toCandidate(row: RadarCsvRow): ListingCandidate {
     ...(row.currencyCode === undefined ? {} : { currency: row.currencyCode }),
     availability: row.availability,
     observedAt: row.observedAt,
-    attributes: {},
+    attributes: row.confidence === undefined ? {} : { confidence: row.confidence },
   };
 }
 

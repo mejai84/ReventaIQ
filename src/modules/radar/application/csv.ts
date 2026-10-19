@@ -9,7 +9,7 @@ import { z } from "zod";
  * pasted CSV can never leak into a log, an error message or a commit.
  */
 
-export const RADAR_CSV_HEADERS = [
+export const RADAR_CSV_REQUIRED_HEADERS = [
   "source_key",
   "external_listing_id",
   "canonical_url",
@@ -20,10 +20,16 @@ export const RADAR_CSV_HEADERS = [
   "observed_at",
 ] as const;
 
+/**
+ * The downloaded template carries the optional `confidence` column. Files that
+ * still ship only the required eight headers keep parsing.
+ */
+export const RADAR_CSV_HEADERS = [...RADAR_CSV_REQUIRED_HEADERS, "confidence"] as const;
+
 export const MAX_RADAR_CSV_ROWS = 1_000;
 
 export const RADAR_CSV_EXAMPLE_ROW =
-  "manual,PS5-001,https://ejemplo.co/ps5,PS5 Slim,399.99,USD,IN_STOCK,2026-10-19T12:00:00Z";
+  "manual,PS5-001,https://ejemplo.co/ps5,PS5 Slim,399.99,USD,IN_STOCK,2026-10-19T12:00:00Z,80";
 
 export type RadarCsvAvailability = "IN_STOCK" | "OUT_OF_STOCK" | "REMOVED" | "UNKNOWN";
 
@@ -36,6 +42,7 @@ export interface RadarCsvRow {
   readonly currencyCode?: string;
   readonly availability: RadarCsvAvailability;
   readonly observedAt: string;
+  readonly confidence?: string;
 }
 
 /** 1-based spreadsheet line: the header is line 1, never reported as an error. */
@@ -87,6 +94,12 @@ const rowSchema = z.object({
     .optional(),
   availability: z.enum(["IN_STOCK", "OUT_OF_STOCK", "REMOVED", "UNKNOWN"]),
   observedAt: z.string().datetime({ offset: true }),
+  confidence: z
+    .string()
+    .trim()
+    .regex(/^\d{1,3}(?:\.\d{1,4})?$/)
+    .refine((value) => Number(value) >= 0 && Number(value) <= 100)
+    .optional(),
 });
 
 const CODE_BY_FIELD: Readonly<Record<string, string>> = {
@@ -98,6 +111,7 @@ const CODE_BY_FIELD: Readonly<Record<string, string>> = {
   currencyCode: "currency",
   availability: "availability",
   observedAt: "observed_at",
+  confidence: "confidence",
 };
 
 function parseCsvLine(line: string): string[] {
@@ -141,10 +155,9 @@ export function parseRadarCsv(text: string): RadarCsvParseResult {
   if (lines.length === 0) throw new RadarCsvError("empty");
 
   const header = parseCsvLine(lines[0]!).map((name) => name.trim().toLowerCase());
-  if (
-    header.length !== RADAR_CSV_HEADERS.length ||
-    header.some((name, index) => name !== RADAR_CSV_HEADERS[index])
-  ) {
+  const matches = (expected: readonly string[]): boolean =>
+    header.length === expected.length && expected.every((name, index) => header[index] === name);
+  if (!matches(RADAR_CSV_REQUIRED_HEADERS) && !matches(RADAR_CSV_HEADERS)) {
     throw new RadarCsvError("headers");
   }
 
@@ -169,6 +182,7 @@ export function parseRadarCsv(text: string): RadarCsvParseResult {
       currencyCode: raw.currency ? raw.currency : undefined,
       availability: (raw.availability ?? "").toUpperCase(),
       observedAt: raw.observed_at ?? "",
+      confidence: raw.confidence ? raw.confidence : undefined,
     });
 
     if (!parsed.success) {
@@ -191,6 +205,7 @@ export function parseRadarCsv(text: string): RadarCsvParseResult {
       ...(value.currencyCode === undefined ? {} : { currencyCode: value.currencyCode }),
       availability: value.availability,
       observedAt: value.observedAt,
+      ...(value.confidence === undefined ? {} : { confidence: value.confidence }),
     });
   });
 
@@ -210,6 +225,7 @@ export const RADAR_CSV_ERROR_LABELS: Readonly<Record<string, string>> = {
   currency: "moneda inválida",
   availability: "disponibilidad inválida",
   observed_at: "fecha observada inválida",
+  confidence: "confianza fuera de 0-100",
   identity: "falta identificador externo o URL",
   empty: "archivo vacío o solo con cabecera",
   headers: "cabeceras distintas a la plantilla",

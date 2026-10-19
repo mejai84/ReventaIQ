@@ -94,6 +94,23 @@ describe("parseRadarCsv", () => {
     expect(buildRadarCsvTemplate().split("\n")[0]).toBe(RADAR_CSV_HEADERS.join(","));
   });
 
+  it("accepts an optional confidence column and rejects out-of-range values", () => {
+    const withConfidence = parseRadarCsv(
+      `${RADAR_CSV_HEADERS.join(",")}\nmanual,PS5-001,https://ejemplo.co/ps5,PS5 Slim,399.99,USD,IN_STOCK,2026-10-19T12:00:00Z,80`,
+    );
+    expect(withConfidence.errors).toHaveLength(0);
+    expect(withConfidence.rows[0]?.confidence).toBe("80");
+
+    const outOfRange = parseRadarCsv(
+      `${RADAR_CSV_HEADERS.join(",")}\nmanual,PS5-001,https://ejemplo.co/ps5,PS5 Slim,399.99,USD,IN_STOCK,2026-10-19T12:00:00Z,120`,
+    );
+    expect(outOfRange.errors).toEqual([{ row: 2, code: "confidence" }]);
+
+    const requiredOnly = parseRadarCsv(valid);
+    expect(requiredOnly.errors).toHaveLength(0);
+    expect(requiredOnly.rows[0]?.confidence).toBeUndefined();
+  });
+
   it("reads persisted diagnostics defensively", () => {
     expect(
       readRadarCsvErrors([
